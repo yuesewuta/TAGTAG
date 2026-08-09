@@ -4,7 +4,7 @@
 基于 tagLyst Next、localtags、TagSpaces、DeClutter 的可核验证据，形成一份覆盖功能对照、逻辑冲突、标签数据模型、Windows 集成、架构与分阶段实现建议的中文方案，并实现经过测试的 Flutter Windows 桌面 MVP。
 
 ## 当前阶段
-阶段 8
+阶段 9
 
 ## 各阶段
 
@@ -62,9 +62,17 @@
 - [x] 实现存储根、SQLite、真实导入、监控、日志、撤销与基础备份
 - [x] 接入主窗口拖入、待整理、文件打开与定位工作流
 - [x] 完成静态检查、测试、Windows 构建和界面验证
-- [ ] 建立 Git 基线并安全推送到 `git@github.com:yuesewuta/TAGTAG.git`
-- **状态：** in_progress
+- [x] 建立 Git 基线并安全推送到 `git@github.com:yuesewuta/TAGTAG.git`
+- **状态：** complete
 - **前置条件：** 已满足；用户已确认需求和里程碑 1，并授权开发与推送。
+
+### 阶段 9：核心后续安全流程
+- [ ] 实现资源退出管理的恢复原路径、移动到指定位置和 Windows 回收站流程
+- [ ] 为一致性告警接入外部新增接管/移出和外部移动接受/恢复动作
+- [ ] 实现全局备份恢复向导与完整校验
+- [ ] 评估将标签状态从 `%APPDATA%` JSON 合并进资料库 SQLite 的迁移方案
+- [ ] 开始里程碑 2 的全局快捷键、Explorer 右键、悬浮球和托盘
+- **状态：** pending
 
 ## 关键问题
 1. “DeClutter github”具体指哪个仓库或产品，是否存在同名项目歧义？

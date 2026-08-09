@@ -205,3 +205,5 @@
 - 删除标签位置与删除标签实体已分流：多位置只删当前位置并提升子项；最后一个位置删除实体但保留资源和空间成员。
 - 新增 `.github/workflows/release.yml`：手动构建上传 artifact，`vMAJOR.MINOR.PATCH` 标签构建对应 Windows 版本并发布 GitHub Release。
 - 发布前最终结果：`flutter analyze --no-pub` 0 问题，`flutter test --no-pub` 25/25，Windows Release 构建成功，Release 主窗口 1280x720 视觉验证通过。
+- Git 基线已建立：功能提交 `717c124`，合并远程初始历史提交 `50e3014`；`origin/main` 是当前分支祖先。
+- 已非强制推送 `codex/managed-storage-core` 到 `git@github.com:yuesewuta/TAGTAG.git` 并建立上游跟踪。
