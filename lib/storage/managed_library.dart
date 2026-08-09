@@ -18,6 +18,10 @@ enum ManagedOperationType {
   exitRestore,
   exitMove,
   exitRecycle,
+  takeover,
+  untrackedMoveOut,
+  externalMoveAccept,
+  externalMoveRestore,
 }
 
 enum ConsistencyFindingType { untracked, missing }
@@ -95,7 +99,7 @@ class ManagedLibrary {
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
-  static const _schemaVersion = 4;
+  static const _schemaVersion = 5;
 
   final Directory root;
   final Database _database;
@@ -290,6 +294,11 @@ class ManagedLibrary {
               'exit_restore' => ManagedOperationType.exitRestore,
               'exit_move' => ManagedOperationType.exitMove,
               'exit_recycle' => ManagedOperationType.exitRecycle,
+              'takeover' => ManagedOperationType.takeover,
+              'untracked_move_out' => ManagedOperationType.untrackedMoveOut,
+              'external_move_accept' => ManagedOperationType.externalMoveAccept,
+              'external_move_restore' =>
+                ManagedOperationType.externalMoveRestore,
               final value => throw FormatException('未知操作类型: $value'),
             },
             resourceId: row['resource_id'] as String,
@@ -560,6 +569,15 @@ class ManagedLibrary {
   Future<List<ConsistencyFinding>> scanConsistency() async {
     final resources = await listResources();
     final findings = <ConsistencyFinding>[];
+    final resourceUpdates =
+        <
+          ({
+            String id,
+            ManagedResourceStatus status,
+            int? size,
+            DateTime? modified,
+          })
+        >[];
     final now = DateTime.now().toUtc();
     final managedPaths = {
       for (final resource in resources) resource.relativePath,
@@ -594,6 +612,38 @@ class ManagedLibrary {
             detectedAt: now,
           ),
         );
+        resourceUpdates.add((
+          id: resource.id,
+          status: ManagedResourceStatus.missing,
+          size: null,
+          modified: null,
+        ));
+        continue;
+      }
+      try {
+        final stat = await FileStat.stat(_absolutePath(resource.relativePath));
+        resourceUpdates.add((
+          id: resource.id,
+          status: ManagedResourceStatus.managed,
+          size: resource.kind == ManagedResourceKind.file ? stat.size : null,
+          modified: stat.modified.toUtc(),
+        ));
+      } on FileSystemException {
+        findings.add(
+          ConsistencyFinding(
+            id: newId('finding'),
+            type: ConsistencyFindingType.missing,
+            relativePath: resource.relativePath,
+            resourceId: resource.id,
+            detectedAt: now,
+          ),
+        );
+        resourceUpdates.add((
+          id: resource.id,
+          status: ManagedResourceStatus.missing,
+          size: null,
+          modified: null,
+        ));
       }
     }
 
@@ -633,6 +683,23 @@ class ManagedLibrary {
 
     _database.execute('BEGIN IMMEDIATE');
     try {
+      for (final update in resourceUpdates) {
+        if (update.status == ManagedResourceStatus.missing) {
+          _database.execute(
+            "UPDATE resources SET status = 'missing' WHERE id = ?",
+            [update.id],
+          );
+        } else {
+          _database.execute(
+            '''
+              UPDATE resources
+              SET status = 'managed', size_bytes = ?, modified_at = ?
+              WHERE id = ?
+            ''',
+            [update.size, update.modified!.toIso8601String(), update.id],
+          );
+        }
+      }
       _database.execute('DELETE FROM consistency_findings');
       for (final finding in findings) {
         _database.execute(
@@ -658,6 +725,391 @@ class ManagedLibrary {
     return findings;
   }
 
+  Future<ManagedResource> takeOverUntracked(String relativePath) async {
+    final normalizedRelativePath = _normalizeRelativePath(relativePath);
+    final resources = await listResources();
+    if (resources.any(
+      (resource) =>
+          resource.relativePath == normalizedRelativePath ||
+          (resource.kind == ManagedResourceKind.folder &&
+              path.posix.isWithin(
+                resource.relativePath,
+                normalizedRelativePath,
+              )) ||
+          path.posix.isWithin(normalizedRelativePath, resource.relativePath),
+    )) {
+      throw StateError('该路径已属于现有受管资源范围');
+    }
+    final absolutePath = _absolutePath(normalizedRelativePath);
+    final type = await FileSystemEntity.type(absolutePath, followLinks: false);
+    if (type != FileSystemEntityType.file &&
+        type != FileSystemEntityType.directory) {
+      throw FileSystemException('孤立内容不存在或类型不受支持', absolutePath);
+    }
+    final stat = await FileStat.stat(absolutePath);
+    final now = DateTime.now().toUtc();
+    final resource = ManagedResource(
+      id: newId('resource'),
+      name: path.posix.basename(normalizedRelativePath),
+      relativePath: normalizedRelativePath,
+      kind: type == FileSystemEntityType.file
+          ? ManagedResourceKind.file
+          : ManagedResourceKind.folder,
+      status: ManagedResourceStatus.managed,
+      originalPath: null,
+      sizeBytes: type == FileSystemEntityType.file ? stat.size : null,
+      modifiedAt: stat.modified.toUtc(),
+      createdAt: now,
+    );
+    _database.execute('BEGIN IMMEDIATE');
+    try {
+      _database.execute(
+        '''
+          INSERT INTO resources(
+            id, name, relative_path, kind, status, original_path,
+            size_bytes, modified_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        ''',
+        [
+          resource.id,
+          resource.name,
+          resource.relativePath,
+          resource.kind.name,
+          resource.status.name,
+          resource.sizeBytes,
+          resource.modifiedAt.toIso8601String(),
+          resource.createdAt.toIso8601String(),
+        ],
+      );
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at
+          ) VALUES (?, 'takeover', ?, ?, ?, ?, NULL)
+        ''',
+        [
+          newId('operation'),
+          resource.id,
+          absolutePath,
+          resource.relativePath,
+          now.toIso8601String(),
+        ],
+      );
+      _database.execute('COMMIT');
+      return resource;
+    } catch (_) {
+      _database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  Future<ManagedOperation> moveUntrackedOutside(
+    String relativePath,
+    String destinationPath,
+  ) async {
+    final normalizedRelativePath = _normalizeRelativePath(relativePath);
+    final resources = await listResources();
+    if (resources.any(
+      (resource) =>
+          resource.relativePath == normalizedRelativePath ||
+          (resource.kind == ManagedResourceKind.folder &&
+              path.posix.isWithin(
+                resource.relativePath,
+                normalizedRelativePath,
+              )) ||
+          path.posix.isWithin(normalizedRelativePath, resource.relativePath),
+    )) {
+      throw StateError('该路径已属于现有受管资源范围');
+    }
+    final sourcePath = _absolutePath(normalizedRelativePath);
+    final type = await FileSystemEntity.type(sourcePath, followLinks: false);
+    if (type != FileSystemEntityType.file &&
+        type != FileSystemEntityType.directory) {
+      throw FileSystemException('孤立内容不存在或类型不受支持', sourcePath);
+    }
+    final normalizedDestination = path.normalize(
+      path.absolute(destinationPath),
+    );
+    if (path.equals(normalizedDestination, root.path) ||
+        path.isWithin(root.path, normalizedDestination)) {
+      throw ArgumentError.value(
+        destinationPath,
+        'destinationPath',
+        '移出目标必须位于 TAGTAG 存储根之外',
+      );
+    }
+    if (await FileSystemEntity.type(normalizedDestination) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException(
+        '指定位置已存在同名资源，TAGTAG 不会覆盖',
+        normalizedDestination,
+      );
+    }
+
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.untrackedMoveOut,
+      resourceId: newId('untracked'),
+      sourcePath: normalizedDestination,
+      destinationRelativePath: normalizedRelativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+    );
+    await Directory(
+      path.dirname(normalizedDestination),
+    ).create(recursive: true);
+    await _copyEntity(sourcePath, normalizedDestination, type);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at
+          ) VALUES (?, 'untracked_move_out', ?, ?, ?, ?, NULL)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+        ],
+      );
+      await _deleteEntity(sourcePath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(sourcePath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(normalizedDestination) == type) {
+        await Directory(path.dirname(sourcePath)).create(recursive: true);
+        await _copyEntity(normalizedDestination, sourcePath, type);
+      }
+      if (await FileSystemEntity.type(normalizedDestination) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(normalizedDestination, type);
+      }
+      rethrow;
+    }
+  }
+
+  Future<ManagedOperation> acceptExternalMove(
+    String missingResourceId,
+    String untrackedRelativePath,
+  ) async {
+    final resources = await listResources();
+    final matches = resources.where(
+      (resource) => resource.id == missingResourceId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(
+        missingResourceId,
+        'missingResourceId',
+        '找不到缺失资源记录',
+      );
+    }
+    final resource = matches.single;
+    final recordedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(recordedPath) !=
+        FileSystemEntityType.notFound) {
+      throw StateError('资源记录路径并未缺失，不能接受外部移动');
+    }
+    final normalizedCandidate = _normalizeRelativePath(untrackedRelativePath);
+    if (resources.any(
+      (other) =>
+          other.id != resource.id &&
+          (other.relativePath == normalizedCandidate ||
+              (other.kind == ManagedResourceKind.folder &&
+                  path.posix.isWithin(
+                    other.relativePath,
+                    normalizedCandidate,
+                  )) ||
+              path.posix.isWithin(normalizedCandidate, other.relativePath)),
+    )) {
+      throw StateError('候选路径已属于其他受管资源范围');
+    }
+    final candidatePath = _absolutePath(normalizedCandidate);
+    final candidateType = await FileSystemEntity.type(
+      candidatePath,
+      followLinks: false,
+    );
+    final expectedType = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    if (candidateType != expectedType) {
+      throw FileSystemException('候选路径不存在或资源类型与缺失记录不一致', candidatePath);
+    }
+    final stat = await FileStat.stat(candidatePath);
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.externalMoveAccept,
+      resourceId: resource.id,
+      sourcePath: candidatePath,
+      destinationRelativePath: resource.relativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+    );
+
+    _database.execute('BEGIN IMMEDIATE');
+    try {
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at
+          ) VALUES (?, 'external_move_accept', ?, ?, ?, ?, NULL)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+        ],
+      );
+      _database.execute(
+        '''
+          UPDATE resources
+          SET name = ?, relative_path = ?, status = 'managed',
+              size_bytes = ?, modified_at = ?
+          WHERE id = ?
+        ''',
+        [
+          path.posix.basename(normalizedCandidate),
+          normalizedCandidate,
+          candidateType == FileSystemEntityType.file ? stat.size : null,
+          stat.modified.toUtc().toIso8601String(),
+          resource.id,
+        ],
+      );
+      _database.execute('COMMIT');
+      return operation;
+    } catch (_) {
+      _database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  Future<ManagedOperation> restoreExternalMove(
+    String missingResourceId,
+    String untrackedRelativePath,
+  ) async {
+    final resources = await listResources();
+    final matches = resources.where(
+      (resource) => resource.id == missingResourceId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(
+        missingResourceId,
+        'missingResourceId',
+        '找不到缺失资源记录',
+      );
+    }
+    final resource = matches.single;
+    final recordedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(recordedPath) !=
+        FileSystemEntityType.notFound) {
+      throw StateError('资源记录路径并未缺失，不能恢复外部移动');
+    }
+    final normalizedCandidate = _normalizeRelativePath(untrackedRelativePath);
+    if (resources.any(
+      (other) =>
+          other.id != resource.id &&
+          (other.relativePath == normalizedCandidate ||
+              (other.kind == ManagedResourceKind.folder &&
+                  path.posix.isWithin(
+                    other.relativePath,
+                    normalizedCandidate,
+                  )) ||
+              path.posix.isWithin(normalizedCandidate, other.relativePath)),
+    )) {
+      throw StateError('候选路径已属于其他受管资源范围');
+    }
+    final candidatePath = _absolutePath(normalizedCandidate);
+    final candidateType = await FileSystemEntity.type(
+      candidatePath,
+      followLinks: false,
+    );
+    final expectedType = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    if (candidateType != expectedType) {
+      throw FileSystemException('候选路径不存在或资源类型与缺失记录不一致', candidatePath);
+    }
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.externalMoveRestore,
+      resourceId: resource.id,
+      sourcePath: candidatePath,
+      destinationRelativePath: resource.relativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+    );
+
+    await Directory(path.dirname(recordedPath)).create(recursive: true);
+    await _copyEntity(candidatePath, recordedPath, candidateType);
+    var transactionActive = false;
+    try {
+      final stat = await FileStat.stat(recordedPath);
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at
+          ) VALUES (?, 'external_move_restore', ?, ?, ?, ?, NULL)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+        ],
+      );
+      _database.execute(
+        '''
+          UPDATE resources
+          SET status = 'managed', size_bytes = ?, modified_at = ?
+          WHERE id = ?
+        ''',
+        [
+          candidateType == FileSystemEntityType.file ? stat.size : null,
+          stat.modified.toUtc().toIso8601String(),
+          resource.id,
+        ],
+      );
+      await _deleteEntity(candidatePath, candidateType);
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(candidatePath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(recordedPath) == candidateType) {
+        await Directory(path.dirname(candidatePath)).create(recursive: true);
+        await _copyEntity(recordedPath, candidatePath, candidateType);
+      }
+      if (await FileSystemEntity.type(recordedPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(recordedPath, candidateType);
+      }
+      rethrow;
+    }
+  }
+
   Future<void> undo(String operationId, {RecycleBinGateway? recycleBin}) async {
     final matches = (await listOperations()).where(
       (operation) => operation.id == operationId,
@@ -679,6 +1131,22 @@ class ManagedLibrary {
         throw StateError('撤销回收站操作需要 Windows 回收站适配器');
       }
       await _undoRecycleExit(operation, recycleBin);
+      return;
+    }
+    if (operation.type == ManagedOperationType.takeover) {
+      await _undoTakeover(operation);
+      return;
+    }
+    if (operation.type == ManagedOperationType.untrackedMoveOut) {
+      await _undoUntrackedMoveOut(operation);
+      return;
+    }
+    if (operation.type == ManagedOperationType.externalMoveAccept) {
+      await _undoExternalMoveAccept(operation);
+      return;
+    }
+    if (operation.type == ManagedOperationType.externalMoveRestore) {
+      await _undoExternalMoveRestore(operation);
       return;
     }
     if (operation.type == ManagedOperationType.importMove &&
@@ -822,6 +1290,221 @@ class ManagedLibrary {
       if (await FileSystemEntity.type(managedPath) !=
           FileSystemEntityType.notFound) {
         await _deleteEntity(managedPath, type);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _undoTakeover(ManagedOperation operation) async {
+    final resources = (await listResources()).where(
+      (resource) => resource.id == operation.resourceId,
+    );
+    if (resources.isEmpty) {
+      throw StateError('接管操作对应的受管资源记录已不存在');
+    }
+    final resource = resources.single;
+    final expectedType = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    if (await FileSystemEntity.type(_absolutePath(resource.relativePath)) !=
+        expectedType) {
+      throw FileSystemException(
+        '受管资源已缺失，无法撤销接管',
+        _absolutePath(resource.relativePath),
+      );
+    }
+    _database.execute('BEGIN IMMEDIATE');
+    try {
+      _database.execute('DELETE FROM resources WHERE id = ?', [resource.id]);
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      _database.execute('COMMIT');
+    } catch (_) {
+      _database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  Future<void> _undoUntrackedMoveOut(ManagedOperation operation) async {
+    final type = await FileSystemEntity.type(
+      operation.sourcePath,
+      followLinks: false,
+    );
+    if (type != FileSystemEntityType.file &&
+        type != FileSystemEntityType.directory) {
+      throw FileSystemException('移出位置的孤立内容已缺失，无法撤销', operation.sourcePath);
+    }
+    final originalPath = _absolutePath(operation.destinationRelativePath);
+    if (await FileSystemEntity.type(originalPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原存储路径已存在同名资源，TAGTAG 不会覆盖', originalPath);
+    }
+
+    await Directory(path.dirname(originalPath)).create(recursive: true);
+    await _copyEntity(operation.sourcePath, originalPath, type);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      await _deleteEntity(operation.sourcePath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(operation.sourcePath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(originalPath) == type) {
+        await Directory(
+          path.dirname(operation.sourcePath),
+        ).create(recursive: true);
+        await _copyEntity(originalPath, operation.sourcePath, type);
+      }
+      if (await FileSystemEntity.type(originalPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(originalPath, type);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _undoExternalMoveAccept(ManagedOperation operation) async {
+    final resources = (await listResources()).where(
+      (resource) => resource.id == operation.resourceId,
+    );
+    if (resources.isEmpty) {
+      throw StateError('接受外部移动对应的资源记录已不存在');
+    }
+    final resource = resources.single;
+    final acceptedPath = path.normalize(operation.sourcePath);
+    if (!path.equals(acceptedPath, root.path) &&
+        !path.isWithin(root.path, acceptedPath)) {
+      throw StateError('接受外部移动的操作记录包含无效路径');
+    }
+    if (path.normalize(_absolutePath(resource.relativePath)) != acceptedPath) {
+      throw StateError('资源记录已再次变更，无法撤销接受新路径');
+    }
+    final expectedType = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    if (await FileSystemEntity.type(acceptedPath, followLinks: false) !=
+        expectedType) {
+      throw FileSystemException('已接受的新路径内容缺失，无法撤销', acceptedPath);
+    }
+    final recordedPath = _absolutePath(operation.destinationRelativePath);
+    if (await FileSystemEntity.type(recordedPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原记录路径已被占用，无法撤销接受新路径', recordedPath);
+    }
+
+    _database.execute('BEGIN IMMEDIATE');
+    try {
+      _database.execute(
+        '''
+          UPDATE resources
+          SET name = ?, relative_path = ?, status = 'missing'
+          WHERE id = ?
+        ''',
+        [
+          path.posix.basename(operation.destinationRelativePath),
+          operation.destinationRelativePath,
+          operation.resourceId,
+        ],
+      );
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      _database.execute('COMMIT');
+    } catch (_) {
+      _database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  Future<void> _undoExternalMoveRestore(ManagedOperation operation) async {
+    final resources = await listResources();
+    final matches = resources.where(
+      (resource) => resource.id == operation.resourceId,
+    );
+    if (matches.isEmpty) {
+      throw StateError('恢复外部移动对应的资源记录已不存在');
+    }
+    final resource = matches.single;
+    if (resource.relativePath != operation.destinationRelativePath) {
+      throw StateError('资源记录已再次变更，无法撤销恢复记录路径');
+    }
+    final recordedPath = _absolutePath(operation.destinationRelativePath);
+    final expectedType = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    if (await FileSystemEntity.type(recordedPath, followLinks: false) !=
+        expectedType) {
+      throw FileSystemException('记录路径内容已缺失，无法撤销恢复', recordedPath);
+    }
+    final candidatePath = path.normalize(operation.sourcePath);
+    if (!path.equals(candidatePath, root.path) &&
+        !path.isWithin(root.path, candidatePath)) {
+      throw StateError('恢复外部移动的操作记录包含无效路径');
+    }
+    if (await FileSystemEntity.type(candidatePath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原候选路径已被占用，TAGTAG 不会覆盖', candidatePath);
+    }
+    final candidateRelativePath = path
+        .relative(candidatePath, from: root.path)
+        .replaceAll('\\', '/');
+    if (resources.any(
+      (other) =>
+          other.id != resource.id &&
+          (other.relativePath == candidateRelativePath ||
+              (other.kind == ManagedResourceKind.folder &&
+                  path.posix.isWithin(
+                    other.relativePath,
+                    candidateRelativePath,
+                  )) ||
+              path.posix.isWithin(candidateRelativePath, other.relativePath)),
+    )) {
+      throw StateError('原候选路径已属于其他受管资源范围');
+    }
+
+    await Directory(path.dirname(candidatePath)).create(recursive: true);
+    await _copyEntity(recordedPath, candidatePath, expectedType);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        "UPDATE resources SET status = 'missing' WHERE id = ?",
+        [resource.id],
+      );
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      await _deleteEntity(recordedPath, expectedType);
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(recordedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(candidatePath) == expectedType) {
+        await Directory(path.dirname(recordedPath)).create(recursive: true);
+        await _copyEntity(candidatePath, recordedPath, expectedType);
+      }
+      if (await FileSystemEntity.type(candidatePath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(candidatePath, expectedType);
       }
       rethrow;
     }
@@ -1040,6 +1723,14 @@ class ManagedLibrary {
     return normalized == '.' ? '' : normalized;
   }
 
+  static String _normalizeRelativePath(String value) {
+    final normalized = _normalizeRelativeDirectory(value);
+    if (normalized.isEmpty) {
+      throw ArgumentError.value(value, 'relativePath', '必须指定存储根内的资源路径');
+    }
+    return normalized;
+  }
+
   static Future<void> _copyEntity(
     String sourcePath,
     String destinationPath,
@@ -1119,6 +1810,8 @@ class ManagedLibrary {
           _migrateV2ToV3(database);
         case 3:
           _migrateV3ToV4(database);
+        case 4:
+          _migrateV4ToV5(database);
         case _schemaVersion:
           _createSchema(database);
         default:
@@ -1180,6 +1873,21 @@ class ManagedLibrary {
     database.execute('DROP TABLE operations_v3');
   }
 
+  static void _migrateV4ToV5(Database database) {
+    database.execute('ALTER TABLE operations RENAME TO operations_v4');
+    _createOperationsTable(database);
+    database.execute('''
+      INSERT INTO operations(
+        id, type, resource_id, source_path,
+        destination_relative_path, created_at, undone_at, context_json
+      )
+      SELECT id, type, resource_id, source_path,
+             destination_relative_path, created_at, undone_at, context_json
+      FROM operations_v4
+    ''');
+    database.execute('DROP TABLE operations_v4');
+  }
+
   static void _createSchema(Database database) {
     database.execute('''
       CREATE TABLE IF NOT EXISTS metadata (
@@ -1219,7 +1927,9 @@ class ManagedLibrary {
         type TEXT NOT NULL CHECK (
           type IN (
             'import_copy', 'import_move', 'exit_restore',
-            'exit_move', 'exit_recycle'
+            'exit_move', 'exit_recycle', 'takeover',
+            'untracked_move_out', 'external_move_accept',
+            'external_move_restore'
           )
         ),
         resource_id TEXT NOT NULL,

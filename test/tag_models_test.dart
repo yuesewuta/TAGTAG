@@ -351,6 +351,63 @@ void main() {
     expect(visibleIds, isNot(contains(tagged.id)));
   });
 
+  test('consistency actions keep the tag domain synchronized', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-domain-consistency-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await store.save(AppState.demo());
+    final controller = TagTagController(store: store, library: library);
+    await controller.load();
+    final untracked = File('${root.path}/takeover.txt');
+    await untracked.writeAsString('take over');
+
+    final takenOver = await controller.takeOverUntracked('takeover.txt');
+
+    expect(
+      controller.state.resources.map((item) => item.id),
+      contains(takenOver.id),
+    );
+    expect(
+      controller.state.memberships.any(
+        (membership) =>
+            membership.resourceId == takenOver.id &&
+            membership.spaceId == controller.activeSpaceId,
+      ),
+      isTrue,
+    );
+
+    final source = File('${sandbox.path}/tagged.txt');
+    await source.writeAsString('keep tags');
+    final imported = await controller.importManagedResource(
+      source: source,
+      targetDirectory: '',
+      placementIds: const {'place-project'},
+    );
+    await File(imported.path).rename('${root.path}/tagged-renamed.txt');
+
+    await controller.acceptExternalMove(imported.id, 'tagged-renamed.txt');
+
+    expect(
+      controller.state.resources
+          .singleWhere((item) => item.id == imported.id)
+          .path,
+      path.normalize('${root.path}/tagged-renamed.txt'),
+    );
+    expect(
+      controller.state.assignments
+          .where((assignment) => assignment.resourceId == imported.id)
+          .map((assignment) => assignment.placementId),
+      {'place-project'},
+    );
+  });
+
   test('undoing an import removes the resource from the tag domain', () async {
     final sandbox = await Directory.systemTemp.createTemp(
       'tagtag-domain-undo-',

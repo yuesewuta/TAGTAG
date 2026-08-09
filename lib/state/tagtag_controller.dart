@@ -792,6 +792,62 @@ class TagTagController extends ChangeNotifier {
     return managedLibrary.scanConsistency();
   }
 
+  Future<ManagedResource> takeOverUntracked(String relativePath) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final resource = await managedLibrary.takeOverUntracked(relativePath);
+    await _syncManagedResources();
+    notifyListeners();
+    return resource;
+  }
+
+  Future<ManagedOperation> moveUntrackedOutside(
+    String relativePath,
+    String destinationPath,
+  ) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    return managedLibrary.moveUntrackedOutside(relativePath, destinationPath);
+  }
+
+  Future<ManagedOperation> acceptExternalMove(
+    String missingResourceId,
+    String untrackedRelativePath,
+  ) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final operation = await managedLibrary.acceptExternalMove(
+      missingResourceId,
+      untrackedRelativePath,
+    );
+    await _syncManagedResources();
+    notifyListeners();
+    return operation;
+  }
+
+  Future<ManagedOperation> restoreExternalMove(
+    String missingResourceId,
+    String untrackedRelativePath,
+  ) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final operation = await managedLibrary.restoreExternalMove(
+      missingResourceId,
+      untrackedRelativePath,
+    );
+    await _syncManagedResources();
+    notifyListeners();
+    return operation;
+  }
+
   Future<void> assignPlacementToSelection(String placementId) async {
     final spaceId = activeSpaceId;
     if (spaceId == null || selectedResourceIds.isEmpty) {

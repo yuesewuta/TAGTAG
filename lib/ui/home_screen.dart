@@ -934,54 +934,17 @@ class _TagTagHomeState extends State<TagTagHome> {
   }
 
   Future<void> _showConsistencyFindings() async {
-    await showDialog<void>(
+    final findings = await showDialog<List<ConsistencyFinding>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('存储一致性告警'),
-        content: SizedBox(
-          width: 660,
-          height: 420,
-          child: ListView.separated(
-            itemCount: _consistencyFindings.length,
-            separatorBuilder: (_, _) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final finding = _consistencyFindings[index];
-              final missing = finding.type == ConsistencyFindingType.missing;
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  missing
-                      ? Icons.link_off_outlined
-                      : Icons.add_to_drive_outlined,
-                  color: missing
-                      ? Theme.of(context).colorScheme.error
-                      : Theme.of(context).colorScheme.primary,
-                ),
-                title: Text(missing ? '受管资源被外部删除' : '发现未受管内容'),
-                subtitle: Text(
-                  '存储根 / ${finding.relativePath}',
-                  overflow: TextOverflow.ellipsis,
-                ),
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton.icon(
-            onPressed: () async {
-              Navigator.pop(context);
-              await _scanConsistency();
-            },
-            icon: const Icon(Icons.refresh),
-            label: const Text('刷新'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('关闭'),
-          ),
-        ],
+      barrierDismissible: false,
+      builder: (context) => _ConsistencyDialog(
+        controller: controller,
+        initialFindings: _consistencyFindings,
       ),
     );
+    if (findings != null && mounted) {
+      setState(() => _consistencyFindings = findings);
+    }
   }
 
   Future<void> _runAction(
@@ -1075,6 +1038,327 @@ class _TagTagHomeState extends State<TagTagHome> {
   }
 }
 
+class _ConsistencyDialog extends StatefulWidget {
+  const _ConsistencyDialog({
+    required this.controller,
+    required this.initialFindings,
+  });
+
+  final TagTagController controller;
+  final List<ConsistencyFinding> initialFindings;
+
+  @override
+  State<_ConsistencyDialog> createState() => _ConsistencyDialogState();
+}
+
+class _ConsistencyDialogState extends State<_ConsistencyDialog> {
+  late List<ConsistencyFinding> _findings;
+  final Map<String, String> _candidateByResourceId = {};
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _findings = widget.initialFindings;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final untracked = _findings
+        .where((finding) => finding.type == ConsistencyFindingType.untracked)
+        .toList();
+    return AlertDialog(
+      title: const Text('存储一致性告警'),
+      content: SizedBox(
+        width: 760,
+        height: 500,
+        child: Column(
+          children: [
+            if (_error != null) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Expanded(
+              child: _findings.isEmpty
+                  ? const Center(child: Text('当前没有存储一致性异常'))
+                  : ListView.separated(
+                      itemCount: _findings.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final finding = _findings[index];
+                        return finding.type == ConsistencyFindingType.untracked
+                            ? _buildUntrackedRow(finding)
+                            : _buildMissingRow(finding, untracked);
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: _busy ? null : _refresh,
+          icon: const Icon(Icons.refresh),
+          label: const Text('刷新'),
+        ),
+        FilledButton(
+          onPressed: _busy ? null : () => Navigator.pop(context, _findings),
+          child: const Text('关闭'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUntrackedRow(ConsistencyFinding finding) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(
+            Icons.add_to_drive_outlined,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '发现未受管内容',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  '存储根 / ${finding.relativePath}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          OutlinedButton.icon(
+            onPressed: _busy
+                ? null
+                : () => _runAction(
+                    () => widget.controller.takeOverUntracked(
+                      finding.relativePath,
+                    ),
+                    '已接管该内容。',
+                  ),
+            icon: const Icon(Icons.add_task_outlined, size: 18),
+            label: const Text('接管'),
+          ),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: _busy ? null : () => _moveUntrackedOut(finding),
+            icon: const Icon(Icons.drive_file_move_outline, size: 18),
+            label: const Text('移出'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMissingRow(
+    ConsistencyFinding finding,
+    List<ConsistencyFinding> untracked,
+  ) {
+    final resourceId = finding.resourceId;
+    final selected = resourceId == null
+        ? null
+        : _candidateByResourceId[resourceId];
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.link_off_outlined,
+            color: Theme.of(context).colorScheme.error,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '受管资源被外部删除或移动',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                Text(
+                  '记录路径：存储根 / ${finding.relativePath}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 8),
+                if (untracked.isEmpty)
+                  Text(
+                    '当前没有可配对的未受管内容',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                else
+                  DropdownButtonFormField<String>(
+                    initialValue: selected,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: '选择实际移动到的路径',
+                      isDense: true,
+                    ),
+                    items: [
+                      for (final candidate in untracked)
+                        DropdownMenuItem(
+                          value: candidate.relativePath,
+                          child: Text(
+                            '存储根 / ${candidate.relativePath}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: _busy || resourceId == null
+                        ? null
+                        : (value) => setState(() {
+                            if (value == null) {
+                              _candidateByResourceId.remove(resourceId);
+                            } else {
+                              _candidateByResourceId[resourceId] = value;
+                            }
+                          }),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              OutlinedButton.icon(
+                onPressed: _busy || resourceId == null || selected == null
+                    ? null
+                    : () => _runAction(
+                        () => widget.controller.acceptExternalMove(
+                          resourceId,
+                          selected,
+                        ),
+                        '已接受资源的新路径。',
+                      ),
+                icon: const Icon(Icons.link_outlined, size: 18),
+                label: const Text('接受新路径'),
+              ),
+              const SizedBox(height: 6),
+              OutlinedButton.icon(
+                onPressed: _busy || resourceId == null || selected == null
+                    ? null
+                    : () => _runAction(
+                        () => widget.controller.restoreExternalMove(
+                          resourceId,
+                          selected,
+                        ),
+                        '已恢复到记录路径。',
+                      ),
+                icon: const Icon(Icons.settings_backup_restore, size: 18),
+                label: const Text('恢复记录路径'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _moveUntrackedOut(ConsistencyFinding finding) async {
+    final destinationDirectory = await getDirectoryPath(
+      initialDirectory: widget.controller.storageRoot?.parent.path,
+      confirmButtonText: '移动到此目录',
+      canCreateDirectories: true,
+    );
+    if (destinationDirectory == null) {
+      return;
+    }
+    final destinationPath = path.join(
+      destinationDirectory,
+      path.posix.basename(finding.relativePath),
+    );
+    await _runAction(
+      () => widget.controller.moveUntrackedOutside(
+        finding.relativePath,
+        destinationPath,
+      ),
+      '已将未受管内容移出存储根。',
+    );
+  }
+
+  Future<void> _runAction(
+    Future<Object?> Function() action,
+    String successMessage,
+  ) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await action();
+      await _refresh(showProgress: false);
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(successMessage)));
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = '$error');
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _refresh({bool showProgress = true}) async {
+    if (showProgress) {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+    }
+    try {
+      final findings = await widget.controller.scanConsistency();
+      if (!mounted) {
+        return;
+      }
+      final validResourceIds = findings
+          .where((finding) => finding.resourceId != null)
+          .map((finding) => finding.resourceId!)
+          .toSet();
+      final validCandidates = findings
+          .where((finding) => finding.type == ConsistencyFindingType.untracked)
+          .map((finding) => finding.relativePath)
+          .toSet();
+      setState(() {
+        _findings = findings;
+        _candidateByResourceId.removeWhere(
+          (resourceId, candidate) =>
+              !validResourceIds.contains(resourceId) ||
+              !validCandidates.contains(candidate),
+        );
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = '刷新失败：$error');
+      }
+    } finally {
+      if (showProgress && mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+}
+
 class _OperationLogDialog extends StatefulWidget {
   const _OperationLogDialog({required this.controller});
 
@@ -1163,6 +1447,26 @@ class _OperationLogDialogState extends State<_OperationLogDialog> {
                           title = '移入 Windows 回收站退出管理';
                           subtitle =
                               '存储根 / ${operation.destinationRelativePath}\nWindows 回收站';
+                        case ManagedOperationType.takeover:
+                          icon = Icons.add_task_outlined;
+                          title = '接管未受管内容';
+                          subtitle =
+                              '存储根 / ${operation.destinationRelativePath}';
+                        case ManagedOperationType.untrackedMoveOut:
+                          icon = Icons.drive_file_move_outline;
+                          title = '移出未受管内容';
+                          subtitle =
+                              '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
+                        case ManagedOperationType.externalMoveAccept:
+                          icon = Icons.link_outlined;
+                          title = '接受外部移动的新路径';
+                          subtitle =
+                              '原记录：存储根 / ${operation.destinationRelativePath}\n新路径：${operation.sourcePath}';
+                        case ManagedOperationType.externalMoveRestore:
+                          icon = Icons.settings_backup_restore;
+                          title = '恢复外部移动的记录路径';
+                          subtitle =
+                              '从 ${operation.sourcePath}\n恢复到：存储根 / ${operation.destinationRelativePath}';
                       }
                       return ListTile(
                         contentPadding: EdgeInsets.zero,

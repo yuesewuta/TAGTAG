@@ -799,6 +799,9 @@ void main() {
 
       await File('${root.path}/managed.txt').writeAsString('normal edit');
       expect(await library.scanConsistency(), isEmpty);
+      final refreshed = (await library.listResources()).single;
+      expect(refreshed.status, ManagedResourceStatus.managed);
+      expect(refreshed.sizeBytes, 'normal edit'.length);
 
       await File('${root.path}/managed.txt').delete();
       await File(
@@ -819,6 +822,240 @@ void main() {
             .single
             .relativePath,
         'outside-addition.txt',
+      );
+      expect(
+        (await library.listResources()).single.status,
+        ManagedResourceStatus.missing,
+      );
+    },
+  );
+
+  test('taking over untracked content is logged and undoable', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-takeover-untracked-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final untracked = File('${root.path}/incoming/接管.txt');
+    await untracked.create(recursive: true);
+    await untracked.writeAsString('take over without moving');
+
+    final resource = await library.takeOverUntracked('incoming/接管.txt');
+
+    expect(resource.relativePath, 'incoming/接管.txt');
+    expect(resource.originalPath, isNull);
+    expect(await untracked.readAsString(), 'take over without moving');
+    expect(await library.scanConsistency(), isEmpty);
+    final operation = (await library.listOperations()).first;
+    expect(operation.type, ManagedOperationType.takeover);
+    expect(operation.resourceId, resource.id);
+
+    await library.undo(operation.id);
+
+    expect(await untracked.readAsString(), 'take over without moving');
+    expect(await library.listResources(), isEmpty);
+    expect(
+      (await library.scanConsistency()).single.type,
+      ConsistencyFindingType.untracked,
+    );
+  });
+
+  test(
+    'moving untracked content outside the root is logged and undoable',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-move-untracked-out-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final untracked = Directory('${root.path}/folder');
+      await untracked.create(recursive: true);
+      await File('${untracked.path}/note.txt').writeAsString('move out');
+      final destination = Directory('${sandbox.path}/outside/renamed-folder');
+
+      final operation = await library.moveUntrackedOutside(
+        'folder',
+        destination.path,
+      );
+
+      expect(operation.type, ManagedOperationType.untrackedMoveOut);
+      expect(await untracked.exists(), isFalse);
+      expect(
+        await File('${destination.path}/note.txt').readAsString(),
+        'move out',
+      );
+      expect(await library.scanConsistency(), isEmpty);
+
+      await library.undo(operation.id);
+
+      expect(await destination.exists(), isFalse);
+      expect(
+        await File('${untracked.path}/note.txt').readAsString(),
+        'move out',
+      );
+      expect((await library.scanConsistency()).single.relativePath, 'folder');
+    },
+  );
+
+  test(
+    'moving untracked content never overwrites an external target',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-untracked-move-conflict-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final untracked = File('${root.path}/untracked.txt');
+      final destination = File('${sandbox.path}/outside.txt');
+      await untracked.writeAsString('keep inside');
+      await destination.writeAsString('keep outside');
+
+      await expectLater(
+        library.moveUntrackedOutside('untracked.txt', destination.path),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(await untracked.readAsString(), 'keep inside');
+      expect(await destination.readAsString(), 'keep outside');
+      expect(await library.listOperations(), isEmpty);
+    },
+  );
+
+  test(
+    'accepting an explicitly paired external move preserves identity',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-accept-external-move-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/source.txt');
+      await source.writeAsString('externally moved');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final resource = await library.importResource(
+        source: source,
+        targetDirectory: '',
+      );
+      final oldPath = File('${root.path}/source.txt');
+      final newPath = File('${root.path}/external/new-name.txt');
+      await newPath.parent.create(recursive: true);
+      await oldPath.rename(newPath.path);
+      await library.scanConsistency();
+
+      final operation = await library.acceptExternalMove(
+        resource.id,
+        'external/new-name.txt',
+      );
+
+      final accepted = (await library.listResources()).single;
+      expect(accepted.id, resource.id);
+      expect(accepted.relativePath, 'external/new-name.txt');
+      expect(accepted.status, ManagedResourceStatus.managed);
+      expect(operation.type, ManagedOperationType.externalMoveAccept);
+      expect(await library.scanConsistency(), isEmpty);
+
+      await library.undo(operation.id);
+
+      final restoredRecord = (await library.listResources()).single;
+      expect(restoredRecord.id, resource.id);
+      expect(restoredRecord.relativePath, 'source.txt');
+      expect(restoredRecord.status, ManagedResourceStatus.missing);
+      expect(await newPath.readAsString(), 'externally moved');
+      final findings = await library.scanConsistency();
+      expect(
+        findings.map((finding) => finding.type),
+        containsAll(<ConsistencyFindingType>[
+          ConsistencyFindingType.missing,
+          ConsistencyFindingType.untracked,
+        ]),
+      );
+    },
+  );
+
+  test('restoring an explicitly paired external move is undoable', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-restore-external-move-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/source.txt');
+    await source.writeAsString('restore external move');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final resource = await library.importResource(
+      source: source,
+      targetDirectory: '',
+    );
+    final recordedPath = File('${root.path}/source.txt');
+    final movedPath = File('${root.path}/renamed.txt');
+    await recordedPath.rename(movedPath.path);
+    await library.scanConsistency();
+
+    final operation = await library.restoreExternalMove(
+      resource.id,
+      'renamed.txt',
+    );
+
+    final restored = (await library.listResources()).single;
+    expect(restored.id, resource.id);
+    expect(restored.relativePath, 'source.txt');
+    expect(restored.status, ManagedResourceStatus.managed);
+    expect(operation.type, ManagedOperationType.externalMoveRestore);
+    expect(await movedPath.exists(), isFalse);
+    expect(await recordedPath.readAsString(), 'restore external move');
+    expect(await library.scanConsistency(), isEmpty);
+
+    await library.undo(operation.id);
+
+    final missingAgain = (await library.listResources()).single;
+    expect(missingAgain.id, resource.id);
+    expect(missingAgain.relativePath, 'source.txt');
+    expect(missingAgain.status, ManagedResourceStatus.missing);
+    expect(await recordedPath.exists(), isFalse);
+    expect(await movedPath.readAsString(), 'restore external move');
+  });
+
+  test(
+    'restoring an external move never overwrites the recorded path',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-external-restore-conflict-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/source.txt');
+      await source.writeAsString('managed content');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final resource = await library.importResource(
+        source: source,
+        targetDirectory: '',
+      );
+      final recordedPath = File('${root.path}/source.txt');
+      final movedPath = File('${root.path}/renamed.txt');
+      await recordedPath.rename(movedPath.path);
+      await recordedPath.writeAsString('conflicting content');
+
+      await expectLater(
+        library.restoreExternalMove(resource.id, 'renamed.txt'),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(await recordedPath.readAsString(), 'conflicting content');
+      expect(await movedPath.readAsString(), 'managed content');
+      expect(
+        (await library.listOperations()).where(
+          (operation) =>
+              operation.type == ManagedOperationType.externalMoveRestore,
+        ),
+        isEmpty,
       );
     },
   );
