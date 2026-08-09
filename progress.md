@@ -1,5 +1,22 @@
 # 进度日志
 
+## 会话：2026-08-09（阶段 12：补全资源退出管理）
+
+- 使用当前 `C:\Python314\python.exe` 运行 session-catchup；恢复报告只包含上一轮已完成的 UI 重构、本轮启动记录和 22 条未同步工具/消息，未显示新的业务代码变更。
+- Git 实际状态确认：分支 `codex/managed-storage-core`，HEAD `97df033`，工作区干净。
+- 将当前阶段从已完成的阶段 11 推进到阶段 12；先在既已确认的 `ManagedLibrary` 公共 seam 按 TDD 实现“移动到指定位置并退出管理”，再实现 Windows 回收站退出。
+- `ManagedLibrary` 指定位置退出已完成前三个纵向测试切片：文件退出并记录 `exitMove`、同名目标绝不覆盖、撤销回到原受管路径；文件夹完整层级退出与撤销也已通过。
+- 元数据 schema 从 v2 升至 v3，为 `operations.type` 增加 `exit_move`，并提供已有 v2 操作日志的迁移路径。
+- 退出日志上下文增加内部资源快照，保留最初导入路径和资源创建时间；现有域关系 JSON 字段保持顶层结构不变。
+- 直接调用 `flutter.bat` 再次停在批处理启动层且没有 Dart 子进程；终止空会话后按既有方案运行 `dart.exe flutter_tools.snapshot test --no-pub`。沙箱首次阻止写 SDK lockfile，获得受控权限后测试正常运行。
+- 控制器与资源行 UI 已接入指定位置退出；同名冲突提供“重命名后放入 / 改到其他位置 / 取消”，操作日志显示新类型并可撤销。
+- 验证结果：`flutter analyze --no-pub` 0 问题，全量测试 43/43 通过。
+- Windows Release 构建成功；冒烟中的插件打包检查通过。目录选择器检查被一个 20:28 启动、无主窗口但仍持有单实例 Mutex 的既有 `tagtag.exe`（PID 22084）拦截；为避免关闭用户可能仍在使用的进程，本轮暂未强制结束。
+- 经用户批准结束无窗口的旧 TAGTAG PID 22084 后，最新 Windows Release 构建成功，插件打包、存储根目录对话框和单实例三项应用冒烟全部通过。
+- Windows 回收站退出已完成：Dart 网关通过 MethodChannel 调用原生 `IFileOperation`，删除回调把实际回收站 Shell item 的绝对 PIDL 序列化为持久 token，撤销时反序列化同一 token 并移回原受管路径。
+- 回收站核心事务覆盖完整关系清理、`exit_recycle` 日志、schema v3→v4 迁移、受管路径冲突保护与撤销；原生 smoke 真实验证文件和含嵌套内容文件夹的回收/恢复 round trip。
+- 最终验证：`flutter analyze --no-pub` 0 问题，48/48 测试通过，Windows Debug/Release 构建成功；1280×720 与 960×720 `PrintWindow` 检查确认 7 个资源动作图标无重叠、截断或布局漂移。
+
 ## 会话：2026-08-09（Windows 运行时修复与阶段 9 启动）
 
 - 修复 Windows Release 未注册 `file_selector_windows` 与 `desktop_drop` 的问题；正常执行插件生成并重新构建 Release。

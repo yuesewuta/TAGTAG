@@ -504,6 +504,134 @@ void main() {
     },
   );
 
+  test(
+    'specified-path exit cleanup and undo preserve tag relationships',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-domain-exit-move-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final source = File('${sandbox.path}/domain-move.txt');
+      final destination = File('${sandbox.path}/exports/domain-renamed.txt');
+      await source.writeAsString('domain move');
+      final library = await ManagedLibrary.initialize(
+        Directory('${sandbox.path}/library'),
+      );
+      addTearDown(library.close);
+      final store = LocalStore(
+        baseDirectory: Directory('${sandbox.path}/config'),
+      );
+      await store.save(AppState.demo());
+      final controller = TagTagController(store: store, library: library);
+      await controller.load();
+      final imported = await controller.importManagedResource(
+        source: source,
+        targetDirectory: 'managed',
+        mode: ImportMode.move,
+        placementIds: const {'place-project'},
+      );
+
+      final operation = await controller.moveResourceToSpecifiedPath(
+        imported.id,
+        destination.path,
+      );
+
+      expect(controller.state.resources, isNot(contains(imported)));
+      expect(
+        controller.state.memberships.any(
+          (membership) => membership.resourceId == imported.id,
+        ),
+        isFalse,
+      );
+      expect(
+        controller.state.assignments.any(
+          (assignment) => assignment.resourceId == imported.id,
+        ),
+        isFalse,
+      );
+
+      await controller.undoOperation(operation.id);
+
+      expect(
+        controller.state.resources.any(
+          (resource) => resource.id == imported.id,
+        ),
+        isTrue,
+      );
+      expect(
+        controller.state.memberships
+            .where((membership) => membership.resourceId == imported.id)
+            .map((membership) => membership.spaceId),
+        {'space-design'},
+      );
+      expect(
+        controller.state.assignments
+            .where((assignment) => assignment.resourceId == imported.id)
+            .map((assignment) => assignment.placementId),
+        {'place-project'},
+      );
+      expect(await destination.exists(), isFalse);
+    },
+  );
+
+  test('recycle exit cleanup and undo preserve tag relationships', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-domain-exit-recycle-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final source = File('${sandbox.path}/domain-recycle.txt');
+    await source.writeAsString('domain recycle');
+    final recycleBin = _ControllerFakeRecycleBin(
+      Directory('${sandbox.path}/recycle'),
+    );
+    final library = await ManagedLibrary.initialize(
+      Directory('${sandbox.path}/library'),
+    );
+    addTearDown(library.close);
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await store.save(AppState.demo());
+    final controller = TagTagController(
+      store: store,
+      library: library,
+      recycleBin: recycleBin,
+    );
+    await controller.load();
+    final imported = await controller.importManagedResource(
+      source: source,
+      targetDirectory: 'managed',
+      mode: ImportMode.move,
+      placementIds: const {'place-project'},
+    );
+
+    final operation = await controller.recycleResource(imported.id);
+
+    expect(
+      controller.state.resources.any((resource) => resource.id == imported.id),
+      isFalse,
+    );
+    expect(
+      controller.state.assignments.any(
+        (assignment) => assignment.resourceId == imported.id,
+      ),
+      isFalse,
+    );
+
+    await controller.undoOperation(operation.id);
+
+    expect(
+      controller.state.resources.any((resource) => resource.id == imported.id),
+      isTrue,
+    );
+    expect(
+      controller.state.assignments
+          .where((assignment) => assignment.resourceId == imported.id)
+          .map((assignment) => assignment.placementId),
+      {'place-project'},
+    );
+  });
+
   test('one managed resource can be a member of multiple tag spaces', () async {
     final directory = await Directory.systemTemp.createTemp(
       'tagtag-membership-',
@@ -569,4 +697,40 @@ void main() {
       expect(controller.assignmentsForResource('resource-notes'), isEmpty);
     },
   );
+}
+
+class _ControllerFakeRecycleBin implements RecycleBinGateway {
+  _ControllerFakeRecycleBin(this.directory);
+
+  final Directory directory;
+
+  @override
+  Future<String> recycle(String resourcePath) async {
+    await directory.create(recursive: true);
+    final token = path.join(
+      directory.path,
+      '${DateTime.now().microsecondsSinceEpoch}-${path.basename(resourcePath)}',
+    );
+    await _rename(resourcePath, token);
+    return token;
+  }
+
+  @override
+  Future<void> restore(String token, String destinationPath) async {
+    await Directory(path.dirname(destinationPath)).create(recursive: true);
+    await _rename(token, destinationPath);
+  }
+
+  static Future<void> _rename(String source, String destination) async {
+    final type = await FileSystemEntity.type(source);
+    if (type == FileSystemEntityType.file) {
+      await File(source).rename(destination);
+      return;
+    }
+    if (type == FileSystemEntityType.directory) {
+      await Directory(source).rename(destination);
+      return;
+    }
+    throw FileSystemException('找不到回收站测试资源', source);
+  }
 }

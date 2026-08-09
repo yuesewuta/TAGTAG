@@ -67,4 +67,37 @@ void main() {
       expect(launches, 0);
     },
   );
+
+  test(
+    'recycle and restore preserve Unicode paths and the shell token',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-recycle-actions-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final file = File('${sandbox.path}/待删除 文件.txt');
+      final restoredPath = path.join(sandbox.path, 'managed', '恢复 文件.txt');
+      await file.writeAsString('recycle');
+      final calls = <String>[];
+      final actions = WindowsFileActions(
+        recycle: (resourcePath) async {
+          calls.add('recycle:$resourcePath');
+          await file.rename('${sandbox.path}/recycled.txt');
+          return 'shell:回收站-token';
+        },
+        restore: (token, destinationPath) async {
+          calls.add('restore:$token:$destinationPath');
+        },
+      );
+
+      final token = await actions.recycle(file.path);
+      await actions.restore(token, restoredPath);
+
+      expect(token, 'shell:回收站-token');
+      expect(calls, [
+        'recycle:${path.normalize(file.absolute.path)}',
+        'restore:shell:回收站-token:${path.normalize(File(restoredPath).absolute.path)}',
+      ]);
+    },
+  );
 }

@@ -12,10 +12,11 @@ import '../storage/managed_library.dart';
 enum ResourceView { all, hierarchy, inbox, recent, search }
 
 class TagTagController extends ChangeNotifier {
-  TagTagController({required this.store, this.library});
+  TagTagController({required this.store, this.library, this.recycleBin});
 
   final LocalStore store;
   final ManagedLibrary? library;
+  final RecycleBinGateway? recycleBin;
   AppState _state = AppState.empty();
   UserPreferences _preferences = const UserPreferences();
   final Set<String> selectedResourceIds = <String>{};
@@ -639,7 +640,55 @@ class TagTagController extends ChangeNotifier {
     if (managedLibrary == null) {
       throw StateError('TAGTAG 存储根尚未初始化');
     }
-    final contextJson = jsonEncode({
+    final contextJson = _exitContextJson(resourceId);
+    final operation = await managedLibrary.restoreToOriginalPath(
+      resourceId,
+      contextJson: contextJson,
+    );
+    await _syncManagedResources();
+    notifyListeners();
+    return operation;
+  }
+
+  Future<ManagedOperation> moveResourceToSpecifiedPath(
+    String resourceId,
+    String destinationPath,
+  ) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final operation = await managedLibrary.moveToSpecifiedPath(
+      resourceId,
+      destinationPath,
+      contextJson: _exitContextJson(resourceId),
+    );
+    await _syncManagedResources();
+    notifyListeners();
+    return operation;
+  }
+
+  Future<ManagedOperation> recycleResource(String resourceId) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final recycleBinGateway = recycleBin;
+    if (recycleBinGateway == null) {
+      throw UnsupportedError('当前平台没有可用的回收站适配器');
+    }
+    final operation = await managedLibrary.moveToRecycleBin(
+      resourceId,
+      recycleBin: recycleBinGateway,
+      contextJson: _exitContextJson(resourceId),
+    );
+    await _syncManagedResources();
+    notifyListeners();
+    return operation;
+  }
+
+  String _exitContextJson(String resourceId) {
+    return jsonEncode({
       'memberships': [
         for (final membership in _state.memberships)
           if (membership.resourceId == resourceId) membership.toJson(),
@@ -653,13 +702,6 @@ class TagTagController extends ChangeNotifier {
           if (event.resourceId == resourceId) event.toJson(),
       ],
     });
-    final operation = await managedLibrary.restoreToOriginalPath(
-      resourceId,
-      contextJson: contextJson,
-    );
-    await _syncManagedResources();
-    notifyListeners();
-    return operation;
   }
 
   Future<void> undoOperation(String operationId) async {
@@ -675,9 +717,11 @@ class TagTagController extends ChangeNotifier {
       throw ArgumentError.value(operationId, 'operationId', '找不到操作记录');
     }
     final operation = matches.single;
-    await managedLibrary.undo(operationId);
+    await managedLibrary.undo(operationId, recycleBin: recycleBin);
     await _syncManagedResources();
-    if (operation.type == ManagedOperationType.exitRestore &&
+    if ((operation.type == ManagedOperationType.exitRestore ||
+            operation.type == ManagedOperationType.exitMove ||
+            operation.type == ManagedOperationType.exitRecycle) &&
         operation.contextJson != null) {
       await _restoreExitContext(operation);
     }

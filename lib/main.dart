@@ -37,6 +37,7 @@ class TagTagApp extends StatefulWidget {
 }
 
 class _TagTagAppState extends State<TagTagApp> {
+  late final WindowsFileActions _fileActions;
   TagTagController? _controller;
   ManagedLibrary? _library;
   bool _loading = true;
@@ -46,6 +47,7 @@ class _TagTagAppState extends State<TagTagApp> {
   @override
   void initState() {
     super.initState();
+    _fileActions = WindowsFileActions();
     unawaited(_restoreLibrary());
   }
 
@@ -114,7 +116,11 @@ class _TagTagAppState extends State<TagTagApp> {
   }
 
   Future<void> _activate(ManagedLibrary library) async {
-    final controller = TagTagController(store: LocalStore(), library: library);
+    final controller = TagTagController(
+      store: LocalStore(),
+      library: library,
+      recycleBin: _fileActions,
+    );
     await controller.load();
     if (!mounted) {
       await library.close();
@@ -180,10 +186,7 @@ class _TagTagAppState extends State<TagTagApp> {
     }
     final controller = _controller;
     if (controller != null) {
-      return TagTagHome(
-        controller: controller,
-        fileActions: WindowsFileActions(),
-      );
+      return TagTagHome(controller: controller, fileActions: _fileActions);
     }
     return _LibrarySetupScreen(
       busy: _initializing,

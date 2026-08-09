@@ -383,6 +383,8 @@ class _TagTagHomeState extends State<TagTagHome> {
       onReveal: () => _revealResource(resource),
       onAddTag: () => _addTagToResource(resource),
       onClearTags: tags.isEmpty ? null : () => _clearTagsForResource(resource),
+      onMove: () => _moveResourceToSpecifiedPath(resource),
+      onRecycle: () => _recycleResource(resource),
       onRestore: () => _restoreResource(resource),
     );
   }
@@ -444,6 +446,9 @@ class _TagTagHomeState extends State<TagTagHome> {
                                     .isEmpty
                                 ? null
                                 : () => _clearTagsForResource(resource),
+                            onMove: () =>
+                                _moveResourceToSpecifiedPath(resource),
+                            onRecycle: () => _recycleResource(resource),
                             onRestore: () => _restoreResource(resource),
                           ),
                           onAddChild: (parentId) =>
@@ -494,6 +499,116 @@ class _TagTagHomeState extends State<TagTagHome> {
   Future<void> _restoreResource(TagResource resource) async {
     controller.selectResource(resource.id);
     await _restoreSelectedToOriginalPath();
+  }
+
+  Future<void> _moveResourceToSpecifiedPath(TagResource resource) async {
+    var directoryPath = await getDirectoryPath(
+      confirmButtonText: '移动到此文件夹',
+      canCreateDirectories: true,
+    );
+    while (directoryPath != null) {
+      final selectedDirectory = directoryPath;
+      var destinationPath = path.join(selectedDirectory, resource.name);
+      while (await FileSystemEntity.type(destinationPath) !=
+          FileSystemEntityType.notFound) {
+        if (!mounted) {
+          return;
+        }
+        final choice = await showDialog<_MoveConflictChoice>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('目标位置存在同名资源'),
+            content: Text(
+              '“${path.basename(destinationPath)}”已存在，TAGTAG 不会覆盖。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () =>
+                    Navigator.pop(context, _MoveConflictChoice.chooseOther),
+                child: const Text('改到其他位置'),
+              ),
+              FilledButton(
+                onPressed: () =>
+                    Navigator.pop(context, _MoveConflictChoice.rename),
+                child: const Text('重命名后放入'),
+              ),
+            ],
+          ),
+        );
+        if (choice == null) {
+          return;
+        }
+        if (choice == _MoveConflictChoice.chooseOther) {
+          directoryPath = await getDirectoryPath(
+            confirmButtonText: '移动到此文件夹',
+            canCreateDirectories: true,
+          );
+          break;
+        }
+        final newName = await _showTextDialog(
+          title: '重命名后放入',
+          label: '新名称',
+          actionLabel: '使用此名称',
+        );
+        if (newName == null) {
+          return;
+        }
+        final cleanName = newName.trim();
+        if (cleanName.isEmpty ||
+            cleanName == '.' ||
+            cleanName == '..' ||
+            path.basename(cleanName) != cleanName) {
+          _showMessage('请输入不包含路径分隔符的有效名称。', error: true);
+          continue;
+        }
+        destinationPath = path.join(selectedDirectory, cleanName);
+      }
+      if (directoryPath == null) {
+        return;
+      }
+      if (await FileSystemEntity.type(destinationPath) !=
+          FileSystemEntityType.notFound) {
+        continue;
+      }
+      final confirmed = await _confirm(
+        title: '移动到指定位置并退出管理？',
+        message:
+            '“${resource.name}”将移动到“$destinationPath”，并从 TAGTAG 删除标签和空间关系。'
+            '成功后可在操作日志中撤销。',
+        actionLabel: '移动并退出',
+      );
+      if (!confirmed) {
+        return;
+      }
+      await _runAction(() async {
+        await controller.moveResourceToSpecifiedPath(
+          resource.id,
+          destinationPath,
+        );
+      }, successMessage: '已移动到指定位置并退出 TAGTAG 管理。');
+      return;
+    }
+  }
+
+  Future<void> _recycleResource(TagResource resource) async {
+    final confirmed = await _confirm(
+      title: '移入 Windows 回收站并退出管理？',
+      message:
+          '“${resource.name}”将从 TAGTAG 删除标签和空间关系，并移入 Windows 回收站。'
+          '成功后可在操作日志中撤销；清空系统回收站后将无法恢复。',
+      actionLabel: '移入回收站',
+      destructive: true,
+    );
+    if (!confirmed) {
+      return;
+    }
+    await _runAction(() async {
+      await controller.recycleResource(resource.id);
+    }, successMessage: '已移入 Windows 回收站并退出 TAGTAG 管理。');
   }
 
   Future<void> _showQuickTag() async {
@@ -1038,6 +1153,16 @@ class _OperationLogDialogState extends State<_OperationLogDialog> {
                           title = '恢复原路径退出管理';
                           subtitle =
                               '存储根 / ${operation.destinationRelativePath}\n恢复到 ${operation.sourcePath}';
+                        case ManagedOperationType.exitMove:
+                          icon = Icons.drive_file_move_outline;
+                          title = '移动到指定位置退出管理';
+                          subtitle =
+                              '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
+                        case ManagedOperationType.exitRecycle:
+                          icon = Icons.delete_outline;
+                          title = '移入 Windows 回收站退出管理';
+                          subtitle =
+                              '存储根 / ${operation.destinationRelativePath}\nWindows 回收站';
                       }
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
@@ -1419,6 +1544,8 @@ class _TagHierarchyNode extends StatelessWidget {
 
 enum _TagAction { addChild, edit, delete }
 
+enum _MoveConflictChoice { rename, chooseOther }
+
 class _ResourceHeader extends StatelessWidget {
   const _ResourceHeader({required this.compact, required this.multiSelectMode});
 
@@ -1435,7 +1562,7 @@ class _ResourceHeader extends StatelessWidget {
           const Expanded(flex: 4, child: _ColumnLabel('名称')),
           if (!compact) const Expanded(flex: 3, child: _ColumnLabel('直接标签')),
           const Expanded(flex: 2, child: _ColumnLabel('修改时间')),
-          const SizedBox(width: 174),
+          const SizedBox(width: 242),
         ],
       ),
     );
@@ -1471,6 +1598,8 @@ class _ResourceRow extends StatelessWidget {
     required this.onReveal,
     required this.onAddTag,
     required this.onClearTags,
+    required this.onMove,
+    required this.onRecycle,
     required this.onRestore,
   });
 
@@ -1486,6 +1615,8 @@ class _ResourceRow extends StatelessWidget {
   final Future<void> Function() onReveal;
   final Future<void> Function() onAddTag;
   final Future<void> Function()? onClearTags;
+  final Future<void> Function() onMove;
+  final Future<void> Function() onRecycle;
   final Future<void> Function() onRestore;
 
   @override
@@ -1587,6 +1718,8 @@ class _ResourceRow extends StatelessWidget {
                 onReveal: onReveal,
                 onAddTag: onAddTag,
                 onClearTags: onClearTags,
+                onMove: onMove,
+                onRecycle: onRecycle,
                 onRestore: onRestore,
               ),
             ],
@@ -1603,6 +1736,8 @@ class _ResourceActions extends StatelessWidget {
     required this.onReveal,
     required this.onAddTag,
     required this.onClearTags,
+    required this.onMove,
+    required this.onRecycle,
     required this.onRestore,
   });
 
@@ -1610,12 +1745,14 @@ class _ResourceActions extends StatelessWidget {
   final Future<void> Function() onReveal;
   final Future<void> Function() onAddTag;
   final Future<void> Function()? onClearTags;
+  final Future<void> Function() onMove;
+  final Future<void> Function() onRecycle;
   final Future<void> Function() onRestore;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 174,
+      width: 242,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
@@ -1638,6 +1775,16 @@ class _ResourceActions extends StatelessWidget {
             tooltip: '清除全部直接标签',
             icon: Icons.label_off_outlined,
             onPressed: onClearTags,
+          ),
+          _ActionIcon(
+            tooltip: '移动到指定位置并退出管理',
+            icon: Icons.drive_file_move_outline,
+            onPressed: onMove,
+          ),
+          _ActionIcon(
+            tooltip: '移入 Windows 回收站并退出管理',
+            icon: Icons.delete_outline,
+            onPressed: onRecycle,
           ),
           _ActionIcon(
             tooltip: '恢复先前路径并退出管理',
@@ -1681,6 +1828,8 @@ class _HierarchyResourceRow extends StatelessWidget {
     required this.onReveal,
     required this.onAddTag,
     required this.onClearTags,
+    required this.onMove,
+    required this.onRecycle,
     required this.onRestore,
   });
 
@@ -1690,6 +1839,8 @@ class _HierarchyResourceRow extends StatelessWidget {
   final Future<void> Function() onReveal;
   final Future<void> Function() onAddTag;
   final Future<void> Function()? onClearTags;
+  final Future<void> Function() onMove;
+  final Future<void> Function() onRecycle;
   final Future<void> Function() onRestore;
 
   @override
@@ -1736,6 +1887,8 @@ class _HierarchyResourceRow extends StatelessWidget {
                   onReveal: onReveal,
                   onAddTag: onAddTag,
                   onClearTags: onClearTags,
+                  onMove: onMove,
+                  onRecycle: onRecycle,
                   onRestore: onRestore,
                 ),
               ],

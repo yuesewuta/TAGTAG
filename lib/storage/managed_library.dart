@@ -12,9 +12,21 @@ enum ManagedResourceKind { file, folder }
 
 enum ManagedResourceStatus { managed, missing }
 
-enum ManagedOperationType { importCopy, importMove, exitRestore }
+enum ManagedOperationType {
+  importCopy,
+  importMove,
+  exitRestore,
+  exitMove,
+  exitRecycle,
+}
 
 enum ConsistencyFindingType { untracked, missing }
+
+abstract interface class RecycleBinGateway {
+  Future<String> recycle(String resourcePath);
+
+  Future<void> restore(String token, String destinationPath);
+}
 
 class ManagedResource {
   const ManagedResource({
@@ -83,7 +95,7 @@ class ManagedLibrary {
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
-  static const _schemaVersion = 2;
+  static const _schemaVersion = 4;
 
   final Directory root;
   final Database _database;
@@ -276,6 +288,8 @@ class ManagedLibrary {
               'import_copy' => ManagedOperationType.importCopy,
               'import_move' => ManagedOperationType.importMove,
               'exit_restore' => ManagedOperationType.exitRestore,
+              'exit_move' => ManagedOperationType.exitMove,
+              'exit_recycle' => ManagedOperationType.exitRecycle,
               final value => throw FormatException('未知操作类型: $value'),
             },
             resourceId: row['resource_id'] as String,
@@ -326,7 +340,7 @@ class ManagedLibrary {
       destinationRelativePath: resource.relativePath,
       createdAt: DateTime.now().toUtc(),
       undoneAt: null,
-      contextJson: contextJson,
+      contextJson: _exitContextJson(resource, contextJson),
     );
     await Directory(path.dirname(originalPath)).create(recursive: true);
     await _copyEntity(managedPath, originalPath, type);
@@ -368,6 +382,176 @@ class ManagedLibrary {
       if (await FileSystemEntity.type(originalPath) !=
           FileSystemEntityType.notFound) {
         await _deleteEntity(originalPath, type);
+      }
+      rethrow;
+    }
+  }
+
+  Future<ManagedOperation> moveToSpecifiedPath(
+    String resourceId,
+    String destinationPath, {
+    String? contextJson,
+  }) async {
+    final matches = (await listResources()).where(
+      (resource) => resource.id == resourceId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(resourceId, 'resourceId', '找不到受管资源');
+    }
+    final resource = matches.single;
+    final normalizedDestination = path.normalize(
+      path.absolute(destinationPath),
+    );
+    if (path.equals(normalizedDestination, root.path) ||
+        path.isWithin(root.path, normalizedDestination)) {
+      throw ArgumentError.value(
+        destinationPath,
+        'destinationPath',
+        '退出管理的目标必须位于 TAGTAG 存储根之外',
+      );
+    }
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final managedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(managedPath) != type) {
+      throw FileSystemException('受管资源已缺失，无法移动到指定位置', managedPath);
+    }
+    if (await FileSystemEntity.type(normalizedDestination) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException(
+        '指定位置已存在同名资源，TAGTAG 不会覆盖',
+        normalizedDestination,
+      );
+    }
+
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.exitMove,
+      resourceId: resource.id,
+      sourcePath: normalizedDestination,
+      destinationRelativePath: resource.relativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+      contextJson: _exitContextJson(resource, contextJson),
+    );
+    await Directory(
+      path.dirname(normalizedDestination),
+    ).create(recursive: true);
+    await _copyEntity(managedPath, normalizedDestination, type);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at, context_json
+          ) VALUES (?, 'exit_move', ?, ?, ?, ?, NULL, ?)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+          operation.contextJson,
+        ],
+      );
+      _database.execute('DELETE FROM resources WHERE id = ?', [resource.id]);
+      await _deleteEntity(managedPath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(managedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(normalizedDestination) == type) {
+        await Directory(path.dirname(managedPath)).create(recursive: true);
+        await _copyEntity(normalizedDestination, managedPath, type);
+      }
+      if (await FileSystemEntity.type(normalizedDestination) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(normalizedDestination, type);
+      }
+      rethrow;
+    }
+  }
+
+  Future<ManagedOperation> moveToRecycleBin(
+    String resourceId, {
+    required RecycleBinGateway recycleBin,
+    String? contextJson,
+  }) async {
+    final matches = (await listResources()).where(
+      (resource) => resource.id == resourceId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(resourceId, 'resourceId', '找不到受管资源');
+    }
+    final resource = matches.single;
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final managedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(managedPath) != type) {
+      throw FileSystemException('受管资源已缺失，无法移入回收站', managedPath);
+    }
+
+    final operationId = newId('operation');
+    final token = await recycleBin.recycle(managedPath);
+    if (token.isEmpty) {
+      throw StateError('Windows 回收站没有返回可撤销标识');
+    }
+    if (await FileSystemEntity.type(managedPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('资源未成功移入 Windows 回收站', managedPath);
+    }
+    final operation = ManagedOperation(
+      id: operationId,
+      type: ManagedOperationType.exitRecycle,
+      resourceId: resource.id,
+      sourcePath: token,
+      destinationRelativePath: resource.relativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+      contextJson: _exitContextJson(resource, contextJson),
+    );
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at, context_json
+          ) VALUES (?, 'exit_recycle', ?, ?, ?, ?, NULL, ?)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+          operation.contextJson,
+        ],
+      );
+      _database.execute('DELETE FROM resources WHERE id = ?', [resource.id]);
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(managedPath) ==
+          FileSystemEntityType.notFound) {
+        await recycleBin.restore(token, managedPath);
       }
       rethrow;
     }
@@ -474,7 +658,7 @@ class ManagedLibrary {
     return findings;
   }
 
-  Future<void> undo(String operationId) async {
+  Future<void> undo(String operationId, {RecycleBinGateway? recycleBin}) async {
     final matches = (await listOperations()).where(
       (operation) => operation.id == operationId,
     );
@@ -485,8 +669,16 @@ class ManagedLibrary {
     if (operation.undoneAt != null) {
       throw StateError('该操作已经撤销');
     }
-    if (operation.type == ManagedOperationType.exitRestore) {
-      await _undoRestoreExit(operation);
+    if (operation.type == ManagedOperationType.exitRestore ||
+        operation.type == ManagedOperationType.exitMove) {
+      await _undoExit(operation);
+      return;
+    }
+    if (operation.type == ManagedOperationType.exitRecycle) {
+      if (recycleBin == null) {
+        throw StateError('撤销回收站操作需要 Windows 回收站适配器');
+      }
+      await _undoRecycleExit(operation, recycleBin);
       return;
     }
     if (operation.type == ManagedOperationType.importMove &&
@@ -557,14 +749,14 @@ class ManagedLibrary {
     }
   }
 
-  Future<void> _undoRestoreExit(ManagedOperation operation) async {
+  Future<void> _undoExit(ManagedOperation operation) async {
     final type = await FileSystemEntity.type(
       operation.sourcePath,
       followLinks: false,
     );
     if (type != FileSystemEntityType.file &&
         type != FileSystemEntityType.directory) {
-      throw FileSystemException('恢复位置的资源已缺失，无法撤销退出管理', operation.sourcePath);
+      throw FileSystemException('退出位置的资源已缺失，无法撤销退出管理', operation.sourcePath);
     }
     final managedPath = _absolutePath(operation.destinationRelativePath);
     if (await FileSystemEntity.type(managedPath) !=
@@ -577,6 +769,17 @@ class ManagedLibrary {
     var transactionActive = false;
     try {
       final stat = await FileStat.stat(managedPath);
+      final context = operation.contextJson == null
+          ? const <String, dynamic>{}
+          : Map<String, dynamic>.from(
+              jsonDecode(operation.contextJson!) as Map,
+            );
+      final originalPath = operation.type == ManagedOperationType.exitRestore
+          ? operation.sourcePath
+          : context['_resourceOriginalPath'] as String?;
+      final resourceCreatedAt = DateTime.tryParse(
+        context['_resourceCreatedAt'] as String? ?? '',
+      );
       _database.execute('BEGIN IMMEDIATE');
       transactionActive = true;
       _database.execute(
@@ -591,10 +794,10 @@ class ManagedLibrary {
           path.posix.basename(operation.destinationRelativePath),
           operation.destinationRelativePath,
           type == FileSystemEntityType.file ? 'file' : 'folder',
-          operation.sourcePath,
+          originalPath,
           type == FileSystemEntityType.file ? stat.size : null,
           stat.modified.toUtc().toIso8601String(),
-          operation.createdAt.toIso8601String(),
+          (resourceCreatedAt ?? operation.createdAt).toIso8601String(),
         ],
       );
       _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
@@ -622,6 +825,93 @@ class ManagedLibrary {
       }
       rethrow;
     }
+  }
+
+  Future<void> _undoRecycleExit(
+    ManagedOperation operation,
+    RecycleBinGateway recycleBin,
+  ) async {
+    final managedPath = _absolutePath(operation.destinationRelativePath);
+    if (await FileSystemEntity.type(managedPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原受管路径已存在同名资源，TAGTAG 不会覆盖', managedPath);
+    }
+
+    await Directory(path.dirname(managedPath)).create(recursive: true);
+    await recycleBin.restore(operation.sourcePath, managedPath);
+    final type = await FileSystemEntity.type(managedPath, followLinks: false);
+    if (type != FileSystemEntityType.file &&
+        type != FileSystemEntityType.directory) {
+      throw FileSystemException('回收站资源未恢复到受管路径', managedPath);
+    }
+    var transactionActive = false;
+    try {
+      final stat = await FileStat.stat(managedPath);
+      final context = operation.contextJson == null
+          ? const <String, dynamic>{}
+          : Map<String, dynamic>.from(
+              jsonDecode(operation.contextJson!) as Map,
+            );
+      final resourceCreatedAt = DateTime.tryParse(
+        context['_resourceCreatedAt'] as String? ?? '',
+      );
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO resources(
+            id, name, relative_path, kind, status, original_path,
+            size_bytes, modified_at, created_at
+          ) VALUES (?, ?, ?, ?, 'managed', ?, ?, ?, ?)
+        ''',
+        [
+          operation.resourceId,
+          path.posix.basename(operation.destinationRelativePath),
+          operation.destinationRelativePath,
+          type == FileSystemEntityType.file ? 'file' : 'folder',
+          context['_resourceOriginalPath'] as String?,
+          type == FileSystemEntityType.file ? stat.size : null,
+          stat.modified.toUtc().toIso8601String(),
+          (resourceCreatedAt ?? operation.createdAt).toIso8601String(),
+        ],
+      );
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(managedPath) !=
+          FileSystemEntityType.notFound) {
+        final replacementToken = await recycleBin.recycle(managedPath);
+        _database.execute(
+          'UPDATE operations SET source_path = ? WHERE id = ?',
+          [replacementToken, operation.id],
+        );
+      }
+      rethrow;
+    }
+  }
+
+  static String _exitContextJson(
+    ManagedResource resource,
+    String? contextJson,
+  ) {
+    final context = <String, dynamic>{};
+    if (contextJson != null) {
+      final decoded = jsonDecode(contextJson);
+      if (decoded is! Map) {
+        throw const FormatException('退出管理操作上下文必须是 JSON 对象');
+      }
+      context.addAll(Map<String, dynamic>.from(decoded));
+    }
+    context['_resourceOriginalPath'] = resource.originalPath;
+    context['_resourceCreatedAt'] = resource.createdAt.toIso8601String();
+    return jsonEncode(context);
   }
 
   Future<Directory> createBackup(
@@ -825,6 +1115,10 @@ class ManagedLibrary {
           _createSchema(database);
         case 1:
           _migrateV1ToV2(database);
+        case 2:
+          _migrateV2ToV3(database);
+        case 3:
+          _migrateV3ToV4(database);
         case _schemaVersion:
           _createSchema(database);
         default:
@@ -854,6 +1148,36 @@ class ManagedLibrary {
       FROM operations_v1
     ''');
     database.execute('DROP TABLE operations_v1');
+  }
+
+  static void _migrateV2ToV3(Database database) {
+    database.execute('ALTER TABLE operations RENAME TO operations_v2');
+    _createOperationsTable(database);
+    database.execute('''
+      INSERT INTO operations(
+        id, type, resource_id, source_path,
+        destination_relative_path, created_at, undone_at, context_json
+      )
+      SELECT id, type, resource_id, source_path,
+             destination_relative_path, created_at, undone_at, context_json
+      FROM operations_v2
+    ''');
+    database.execute('DROP TABLE operations_v2');
+  }
+
+  static void _migrateV3ToV4(Database database) {
+    database.execute('ALTER TABLE operations RENAME TO operations_v3');
+    _createOperationsTable(database);
+    database.execute('''
+      INSERT INTO operations(
+        id, type, resource_id, source_path,
+        destination_relative_path, created_at, undone_at, context_json
+      )
+      SELECT id, type, resource_id, source_path,
+             destination_relative_path, created_at, undone_at, context_json
+      FROM operations_v3
+    ''');
+    database.execute('DROP TABLE operations_v3');
   }
 
   static void _createSchema(Database database) {
@@ -893,7 +1217,10 @@ class ManagedLibrary {
       CREATE TABLE IF NOT EXISTS operations (
         id TEXT PRIMARY KEY,
         type TEXT NOT NULL CHECK (
-          type IN ('import_copy', 'import_move', 'exit_restore')
+          type IN (
+            'import_copy', 'import_move', 'exit_restore',
+            'exit_move', 'exit_recycle'
+          )
         ),
         resource_id TEXT NOT NULL,
         source_path TEXT NOT NULL,

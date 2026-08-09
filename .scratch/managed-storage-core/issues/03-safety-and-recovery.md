@@ -20,3 +20,5 @@ Implement consistency scanning, durable operation entries, safe undo for imports
 - 2026-08-09: Consistency scan is green for untracked additions, missing resources, and normal edits.
 - 2026-08-09: Basic backup is green with a SQLite online snapshot, manifest, and unwrapped resource hierarchy.
 - 2026-08-09: Restore-to-original exit management is green for files and folders, rejects conflicts without side effects, logs durable metadata, and supports full filesystem and tag-domain undo after restart.
+- 2026-08-09: Specified-path exit management is green for files and folders, rejects same-name and in-root destinations, migrates schema v2 operation history, and supports full filesystem and tag-domain undo.
+- 2026-08-09: Windows Recycle Bin exit is green with a persisted Shell PIDL token, schema v3-to-v4 migration, managed-path conflict protection, and full filesystem/tag-domain undo for files and folders.

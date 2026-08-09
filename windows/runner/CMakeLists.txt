@@ -10,11 +10,20 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
   "utils.cpp"
+  "windows_recycle_bin.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
   "Runner.rc"
   "runner.exe.manifest"
 )
+
+add_executable(tagtag_recycle_bin_smoke EXCLUDE_FROM_ALL
+  "windows_recycle_bin.cpp"
+  "windows_recycle_bin_smoke.cpp"
+)
+apply_standard_settings(tagtag_recycle_bin_smoke)
+target_compile_definitions(tagtag_recycle_bin_smoke PRIVATE "NOMINMAX")
+target_link_libraries(tagtag_recycle_bin_smoke PRIVATE "shell32.lib" "ole32.lib")
 
 # Apply the standard set of build settings. This can be removed for applications
 # that need different build settings.
@@ -34,6 +43,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "ole32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

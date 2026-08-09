@@ -22,3 +22,5 @@ Connect mandatory initialization, main-window import, storage browsing, untagged
 - 2026-08-09: Corrected navigation semantics: collapse is local view state, space switching and direct file/folder imports moved to the app bar, and search/tag hierarchy are independent content pages.
 - 2026-08-09: Removed the inspector, exposed five direct actions per resource, added explicit multi-select mode, and verified normal clicks retain only the latest selection.
 - 2026-08-09: The hierarchy page now recursively expands tag paths, shows tag-entity resource counts, and renders each tag's directly assigned resources inline.
+- 2026-08-09: Resource rows now expose specified-location exit directly; target conflicts offer rename, choose another location, or cancel, and `exit_move` appears in the undoable operation log.
+- 2026-08-09: Resource rows now expose Windows Recycle Bin exit directly with destructive confirmation; `exit_recycle` is visible and undoable in operation history.

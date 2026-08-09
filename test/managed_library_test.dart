@@ -260,6 +260,246 @@ void main() {
   );
 
   test(
+    'moving a managed resource to a specified path exits management',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-exit-move-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/specified-source.txt');
+      final destination = File('${sandbox.path}/exports/renamed.txt');
+      await source.writeAsString('move to specified path');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final imported = await library.importResource(
+        source: source,
+        targetDirectory: 'managed',
+        mode: ImportMode.move,
+      );
+
+      final operation = await library.moveToSpecifiedPath(
+        imported.id,
+        destination.path,
+      );
+
+      expect(await destination.readAsString(), 'move to specified path');
+      expect(
+        await File('${root.path}/managed/specified-source.txt').exists(),
+        isFalse,
+      );
+      expect(await library.listResources(), isEmpty);
+      expect(operation.type, ManagedOperationType.exitMove);
+      expect(operation.resourceId, imported.id);
+      expect(operation.sourcePath, path.normalize(destination.absolute.path));
+      expect(operation.destinationRelativePath, imported.relativePath);
+      expect(operation.undoneAt, isNull);
+    },
+  );
+
+  test('specified-path exit never overwrites an existing resource', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-exit-move-conflict-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/move-conflict-source.txt');
+    final destination = File('${sandbox.path}/exports/conflict.txt');
+    await source.writeAsString('managed version');
+    await destination.create(recursive: true);
+    await destination.writeAsString('existing version');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: 'managed',
+      mode: ImportMode.move,
+    );
+
+    await expectLater(
+      library.moveToSpecifiedPath(imported.id, destination.path),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(await destination.readAsString(), 'existing version');
+    expect(
+      await File(
+        '${root.path}/managed/move-conflict-source.txt',
+      ).readAsString(),
+      'managed version',
+    );
+    expect((await library.listResources()).single.id, imported.id);
+    expect(
+      (await library.listOperations()).where(
+        (operation) => operation.type == ManagedOperationType.exitMove,
+      ),
+      isEmpty,
+    );
+  });
+
+  test('undoing a specified-path exit restores the managed resource', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-undo-exit-move-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/undo-move-source.txt');
+    final destination = File('${sandbox.path}/exports/renamed.txt');
+    await source.writeAsString('undo specified move');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: 'managed',
+      mode: ImportMode.move,
+    );
+    final exitOperation = await library.moveToSpecifiedPath(
+      imported.id,
+      destination.path,
+    );
+
+    await library.undo(exitOperation.id);
+
+    expect(await destination.exists(), isFalse);
+    expect(
+      await File('${root.path}/managed/undo-move-source.txt').readAsString(),
+      'undo specified move',
+    );
+    final restored = (await library.listResources()).single;
+    expect(restored.id, imported.id);
+    expect(restored.relativePath, imported.relativePath);
+    expect(restored.originalPath, imported.originalPath);
+    expect(
+      (await library.listOperations())
+          .singleWhere((operation) => operation.id == exitOperation.id)
+          .undoneAt,
+      isNotNull,
+    );
+  });
+
+  test('specified-path folder exit and undo preserve its hierarchy', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-folder-exit-move-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = Directory('${sandbox.path}/folder-source');
+    final destination = Directory('${sandbox.path}/exports/renamed-folder');
+    await Directory('${source.path}/nested').create(recursive: true);
+    await File('${source.path}/nested/note.txt').writeAsString('folder move');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: 'managed',
+      mode: ImportMode.move,
+    );
+
+    final operation = await library.moveToSpecifiedPath(
+      imported.id,
+      destination.path,
+    );
+
+    expect(
+      await File('${destination.path}/nested/note.txt').readAsString(),
+      'folder move',
+    );
+
+    await library.undo(operation.id);
+
+    expect(await destination.exists(), isFalse);
+    expect(
+      await File(
+        '${root.path}/managed/folder-source/nested/note.txt',
+      ).readAsString(),
+      'folder move',
+    );
+  });
+
+  test('recycle-bin exit and undo restore the same managed resource', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-exit-recycle-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/recycle-source.txt');
+    await source.writeAsString('recycle and undo');
+    final recycleBin = _FakeRecycleBin(Directory('${sandbox.path}/recycle'));
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: 'managed',
+      mode: ImportMode.move,
+    );
+
+    final operation = await library.moveToRecycleBin(
+      imported.id,
+      recycleBin: recycleBin,
+    );
+
+    expect(operation.type, ManagedOperationType.exitRecycle);
+    expect(await library.listResources(), isEmpty);
+    expect(
+      await File('${root.path}/managed/recycle-source.txt').exists(),
+      isFalse,
+    );
+    expect(await recycleBin.contains(operation.sourcePath), isTrue);
+
+    await library.undo(operation.id, recycleBin: recycleBin);
+
+    expect(await recycleBin.contains(operation.sourcePath), isFalse);
+    expect(
+      await File('${root.path}/managed/recycle-source.txt').readAsString(),
+      'recycle and undo',
+    );
+    final restored = (await library.listResources()).single;
+    expect(restored.id, imported.id);
+    expect(restored.originalPath, imported.originalPath);
+  });
+
+  test('recycle-bin undo never overwrites the managed path', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-undo-recycle-conflict-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/recycle-conflict-source.txt');
+    await source.writeAsString('recycled version');
+    final recycleBin = _FakeRecycleBin(Directory('${sandbox.path}/recycle'));
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: 'managed',
+      mode: ImportMode.move,
+    );
+    final operation = await library.moveToRecycleBin(
+      imported.id,
+      recycleBin: recycleBin,
+    );
+    final managedPath = File(
+      '${root.path}/managed/recycle-conflict-source.txt',
+    );
+    await managedPath.writeAsString('conflicting version');
+
+    await expectLater(
+      library.undo(operation.id, recycleBin: recycleBin),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(await managedPath.readAsString(), 'conflicting version');
+    expect(await recycleBin.contains(operation.sourcePath), isTrue);
+    expect(await library.listResources(), isEmpty);
+    expect(
+      (await library.listOperations())
+          .singleWhere((item) => item.id == operation.id)
+          .undoneAt,
+      isNull,
+    );
+  });
+
+  test(
     'undoing a restore exit returns the resource to its managed path',
     () async {
       final sandbox = await Directory.systemTemp.createTemp(
@@ -404,6 +644,145 @@ void main() {
   });
 
   test(
+    'opening a schema v2 library enables specified-path exit logs',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-schema-v2-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/schema-v2.txt');
+      final destination = File('${sandbox.path}/exports/schema-v2.txt');
+      await source.writeAsString('schema v2');
+      final library = await ManagedLibrary.initialize(root);
+      final imported = await library.importResource(
+        source: source,
+        targetDirectory: '',
+        mode: ImportMode.move,
+      );
+      await library.close();
+
+      final database = sqlite3.open('${root.path}/.tagtag/tagtag.sqlite');
+      database.execute('BEGIN IMMEDIATE');
+      try {
+        database.execute('ALTER TABLE operations RENAME TO operations_v3');
+        database.execute('''
+        CREATE TABLE operations (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL CHECK (
+            type IN ('import_copy', 'import_move', 'exit_restore')
+          ),
+          resource_id TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          destination_relative_path TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          undone_at TEXT,
+          context_json TEXT
+        )
+      ''');
+        database.execute('''
+        INSERT INTO operations(
+          id, type, resource_id, source_path,
+          destination_relative_path, created_at, undone_at, context_json
+        )
+        SELECT id, type, resource_id, source_path,
+               destination_relative_path, created_at, undone_at, context_json
+        FROM operations_v3
+      ''');
+        database.execute('DROP TABLE operations_v3');
+        database.execute(
+          "UPDATE metadata SET value = '2' WHERE key = 'schema_version'",
+        );
+        database.execute('COMMIT');
+      } catch (_) {
+        database.execute('ROLLBACK');
+        rethrow;
+      } finally {
+        database.close();
+      }
+
+      final migrated = await ManagedLibrary.open(root);
+      addTearDown(migrated.close);
+
+      final operation = await migrated.moveToSpecifiedPath(
+        imported.id,
+        destination.path,
+      );
+
+      expect(operation.type, ManagedOperationType.exitMove);
+      expect(await destination.readAsString(), 'schema v2');
+    },
+  );
+
+  test('opening a schema v3 library enables recycle exit logs', () async {
+    final sandbox = await Directory.systemTemp.createTemp('tagtag-schema-v3-');
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/schema-v3.txt');
+    await source.writeAsString('schema v3');
+    final library = await ManagedLibrary.initialize(root);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: '',
+      mode: ImportMode.move,
+    );
+    await library.close();
+
+    final database = sqlite3.open('${root.path}/.tagtag/tagtag.sqlite');
+    database.execute('BEGIN IMMEDIATE');
+    try {
+      database.execute('ALTER TABLE operations RENAME TO operations_v4');
+      database.execute('''
+        CREATE TABLE operations (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL CHECK (
+            type IN (
+              'import_copy', 'import_move', 'exit_restore', 'exit_move'
+            )
+          ),
+          resource_id TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          destination_relative_path TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          undone_at TEXT,
+          context_json TEXT
+        )
+      ''');
+      database.execute('''
+        INSERT INTO operations(
+          id, type, resource_id, source_path,
+          destination_relative_path, created_at, undone_at, context_json
+        )
+        SELECT id, type, resource_id, source_path,
+               destination_relative_path, created_at, undone_at, context_json
+        FROM operations_v4
+      ''');
+      database.execute('DROP TABLE operations_v4');
+      database.execute(
+        "UPDATE metadata SET value = '3' WHERE key = 'schema_version'",
+      );
+      database.execute('COMMIT');
+    } catch (_) {
+      database.execute('ROLLBACK');
+      rethrow;
+    } finally {
+      database.close();
+    }
+
+    final migrated = await ManagedLibrary.open(root);
+    addTearDown(migrated.close);
+    final recycleBin = _FakeRecycleBin(Directory('${sandbox.path}/recycle'));
+
+    final operation = await migrated.moveToRecycleBin(
+      imported.id,
+      recycleBin: recycleBin,
+    );
+
+    expect(operation.type, ManagedOperationType.exitRecycle);
+    expect(await recycleBin.contains(operation.sourcePath), isTrue);
+  });
+
+  test(
     'consistency scan reports untracked and missing resources only',
     () async {
       final sandbox = await Directory.systemTemp.createTemp('tagtag-scan-');
@@ -503,4 +882,44 @@ void main() {
       );
     },
   );
+}
+
+class _FakeRecycleBin implements RecycleBinGateway {
+  _FakeRecycleBin(this.directory);
+
+  final Directory directory;
+
+  @override
+  Future<String> recycle(String resourcePath) async {
+    await directory.create(recursive: true);
+    final token = path.join(
+      directory.path,
+      '${DateTime.now().microsecondsSinceEpoch}-${path.basename(resourcePath)}',
+    );
+    await _rename(resourcePath, token);
+    return token;
+  }
+
+  @override
+  Future<void> restore(String token, String destinationPath) async {
+    await Directory(path.dirname(destinationPath)).create(recursive: true);
+    await _rename(token, destinationPath);
+  }
+
+  Future<bool> contains(String token) async {
+    return await FileSystemEntity.type(token) != FileSystemEntityType.notFound;
+  }
+
+  static Future<void> _rename(String source, String destination) async {
+    final type = await FileSystemEntity.type(source);
+    if (type == FileSystemEntityType.file) {
+      await File(source).rename(destination);
+      return;
+    }
+    if (type == FileSystemEntityType.directory) {
+      await Directory(source).rename(destination);
+      return;
+    }
+    throw FileSystemException('找不到回收站测试资源', source);
+  }
 }
