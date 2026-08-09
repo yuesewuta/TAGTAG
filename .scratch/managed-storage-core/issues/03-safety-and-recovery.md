@@ -1,0 +1,21 @@
+# 03 - Safety and recovery
+
+State: claimed
+Type: task
+Blocked by: 01, 02
+
+Implement consistency scanning, durable operation entries, safe undo for imports and moves, and a restorable basic backup.
+
+## Acceptance
+
+- Added, missing, and externally moved resources produce explicit findings.
+- Undo never overwrites a conflicting path.
+- Backup uses a consistent SQLite snapshot and copies managed resources.
+
+## Comments
+
+- 2026-08-09: Copy-import operation logging and staged undo are green.
+- 2026-08-09: Move-undo conflict protection is green and leaves both filesystem and metadata unchanged.
+- 2026-08-09: Successful move undo is green with staged restoration and compensation.
+- 2026-08-09: Consistency scan is green for untracked additions, missing resources, and normal edits.
+- 2026-08-09: Basic backup is green with a SQLite online snapshot, manifest, and unwrapped resource hierarchy.

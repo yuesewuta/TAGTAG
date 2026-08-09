@@ -1,0 +1,75 @@
+name: Windows release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: "3.44.6"
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test
+
+      - name: Resolve build version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $buildName = "${{ github.ref_name }}".TrimStart("v")
+            if ($buildName -notmatch "^\d+\.\d+\.\d+$") {
+              throw "Release tags must use vMAJOR.MINOR.PATCH."
+            }
+            $label = "${{ github.ref_name }}"
+          } else {
+            $buildName = "0.0.${{ github.run_number }}"
+            $label = "manual-${{ github.run_number }}"
+          }
+          "build_name=$buildName" >> $env:GITHUB_OUTPUT
+          "label=$label" >> $env:GITHUB_OUTPUT
+
+      - name: Build Windows release
+        run: flutter build windows --release --build-name "${{ steps.version.outputs.build_name }}" --build-number "${{ github.run_number }}"
+
+      - name: Package Windows release
+        shell: pwsh
+        run: |
+          $archive = "TAGTAG-${{ steps.version.outputs.label }}-windows-x64.zip"
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $archive
+          "archive=$archive" >> $env:GITHUB_OUTPUT
+        id: package
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TAGTAG-windows-x64
+          path: ${{ steps.package.outputs.archive }}
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.archive }}
+          generate_release_notes: true
