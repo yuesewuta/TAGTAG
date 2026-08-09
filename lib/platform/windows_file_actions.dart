@@ -13,10 +13,7 @@ class WindowsFileActions {
 
   Future<void> open(String resourcePath) async {
     final resolved = await _resolveExisting(resourcePath);
-    await _launch('rundll32.exe', [
-      'url.dll,FileProtocolHandler',
-      Uri.file(resolved.path).toString(),
-    ]);
+    await _launch('explorer.exe', [resolved.path]);
   }
 
   Future<void> reveal(String resourcePath) async {

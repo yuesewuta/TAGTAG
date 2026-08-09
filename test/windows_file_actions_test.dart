@@ -5,11 +5,32 @@ import 'package:path/path.dart' as path;
 import 'package:tagtag/platform/windows_file_actions.dart';
 
 void main() {
+  test('open preserves a non-ASCII Windows path for the shell', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-file-actions-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final file = File('${sandbox.path}/测试 副本.txt');
+    await file.writeAsString('notes');
+    final commands = <({String executable, List<String> arguments})>[];
+    final actions = WindowsFileActions(
+      launch: (executable, arguments) async {
+        commands.add((executable: executable, arguments: arguments));
+      },
+    );
+
+    await actions.open(file.path);
+
+    final normalizedPath = path.normalize(file.absolute.path);
+    expect(commands.single.executable, 'explorer.exe');
+    expect(commands.single.arguments, [normalizedPath]);
+  });
+
   test(
-    'open and reveal delegate existing files to Windows shell commands',
+    'reveal delegates existing files to Windows Explorer selection',
     () async {
       final sandbox = await Directory.systemTemp.createTemp(
-        'tagtag-file-actions-',
+        'tagtag-file-reveal-',
       );
       addTearDown(() => sandbox.delete(recursive: true));
       final file = File('${sandbox.path}/notes.txt');
@@ -21,17 +42,11 @@ void main() {
         },
       );
 
-      await actions.open(file.path);
       await actions.reveal(file.path);
 
       final normalizedPath = path.normalize(file.absolute.path);
-      expect(commands[0].executable, 'rundll32.exe');
-      expect(commands[0].arguments, [
-        'url.dll,FileProtocolHandler',
-        Uri.file(normalizedPath).toString(),
-      ]);
-      expect(commands[1].executable, 'explorer.exe');
-      expect(commands[1].arguments, ['/select,', normalizedPath]);
+      expect(commands.single.executable, 'explorer.exe');
+      expect(commands.single.arguments, ['/select,', normalizedPath]);
     },
   );
 

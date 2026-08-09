@@ -15,6 +15,7 @@ class TagTagController extends ChangeNotifier {
   final LocalStore store;
   final ManagedLibrary? library;
   AppState _state = AppState.empty();
+  UserPreferences _preferences = const UserPreferences();
   final Set<String> selectedResourceIds = <String>{};
 
   String? activePlacementId;
@@ -24,6 +25,7 @@ class TagTagController extends ChangeNotifier {
   bool showInbox = false;
 
   AppState get state => _state;
+  UserPreferences get preferences => _preferences;
   Directory? get storageRoot => library?.root;
   String? get activeSpaceId => _state.activeSpaceId;
   TagSpace? get activeSpace {
@@ -36,12 +38,25 @@ class TagTagController extends ChangeNotifier {
   }
 
   Future<void> load() async {
+    _preferences = await store.loadPreferences();
     _state = await store.load();
     if (_state.activeSpaceId == null && _state.spaces.isNotEmpty) {
       _state = _state.copyWith(activeSpaceId: _state.spaces.first.id);
     }
     await _syncManagedResources();
     notifyListeners();
+  }
+
+  Future<void> updatePreferences({
+    bool? moveImportsByDefault,
+    bool? navigationCollapsed,
+  }) async {
+    _preferences = _preferences.copyWith(
+      moveImportsByDefault: moveImportsByDefault,
+      navigationCollapsed: navigationCollapsed,
+    );
+    notifyListeners();
+    await store.savePreferences(_preferences);
   }
 
   List<TagPlacement> get rootPlacements {

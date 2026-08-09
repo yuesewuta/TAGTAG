@@ -8,6 +8,25 @@ import 'package:tagtag/state/tagtag_controller.dart';
 import 'package:tagtag/storage/managed_library.dart';
 
 void main() {
+  test('user preferences persist import and navigation defaults', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'tagtag-preferences-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final store = LocalStore(baseDirectory: directory);
+
+    await store.savePreferences(
+      const UserPreferences(
+        moveImportsByDefault: true,
+        navigationCollapsed: true,
+      ),
+    );
+
+    final loaded = await LocalStore(baseDirectory: directory).loadPreferences();
+    expect(loaded.moveImportsByDefault, isTrue);
+    expect(loaded.navigationCollapsed, isTrue);
+  });
+
   test(
     'one tag entity can appear at two paths while same names stay independent',
     () {

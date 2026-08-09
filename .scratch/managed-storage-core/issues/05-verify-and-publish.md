@@ -18,3 +18,5 @@ Run formatting, analysis, tests, Windows build, and UI checks. Inspect the reque
 - 2026-08-09: Windows Release build passed and produced `build/windows/x64/runner/Release/tagtag.exe`.
 - 2026-08-09: Developer Mode is disabled locally; generated plugin paths were represented by workspace-only directory junctions for the build and remain ignored.
 - 2026-08-09: Created `codex/managed-storage-core`, preserved `origin/main` as an ancestor through a non-destructive unrelated-history merge, and pushed without force.
+- 2026-08-09: Rebuilt the Windows Release after the file-open and navigation changes; packaging, folder-dialog, and single-instance smoke checks all passed.
+- 2026-08-09: Settings persistence passed a real save/close/restart check, and the user's original expanded-navigation preference was restored after verification.

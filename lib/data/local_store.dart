@@ -3,6 +3,42 @@ import 'dart:io';
 
 import '../models/tag_models.dart';
 
+class UserPreferences {
+  const UserPreferences({
+    this.moveImportsByDefault = false,
+    this.navigationCollapsed = false,
+  });
+
+  final bool moveImportsByDefault;
+  final bool navigationCollapsed;
+
+  UserPreferences copyWith({
+    bool? moveImportsByDefault,
+    bool? navigationCollapsed,
+  }) => UserPreferences(
+    moveImportsByDefault: moveImportsByDefault ?? this.moveImportsByDefault,
+    navigationCollapsed: navigationCollapsed ?? this.navigationCollapsed,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'version': 1,
+    'moveImportsByDefault': moveImportsByDefault,
+    'navigationCollapsed': navigationCollapsed,
+  };
+
+  factory UserPreferences.fromJson(Map<String, dynamic> json) {
+    if (json['version'] != 1 ||
+        json['moveImportsByDefault'] is! bool ||
+        json['navigationCollapsed'] is! bool) {
+      throw const FormatException('TAGTAG 设置文件无效');
+    }
+    return UserPreferences(
+      moveImportsByDefault: json['moveImportsByDefault'] as bool,
+      navigationCollapsed: json['navigationCollapsed'] as bool,
+    );
+  }
+}
+
 class LocalStore {
   LocalStore({this.baseDirectory});
 
@@ -38,6 +74,24 @@ class LocalStore {
     );
   }
 
+  Future<UserPreferences> loadPreferences() async {
+    final file = await _preferencesFile();
+    if (!await file.exists()) {
+      return const UserPreferences();
+    }
+    final decoded =
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    return UserPreferences.fromJson(decoded);
+  }
+
+  Future<void> savePreferences(UserPreferences preferences) async {
+    final file = await _preferencesFile();
+    await file.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(preferences.toJson()),
+      flush: true,
+    );
+  }
+
   Future<String> createBackup(AppState state) async {
     final root = await directory;
     final backups = await _ensureDirectory(
@@ -67,6 +121,11 @@ class LocalStore {
   Future<File> _stateFile() async {
     final root = await directory;
     return File('${root.path}${Platform.pathSeparator}state.json');
+  }
+
+  Future<File> _preferencesFile() async {
+    final root = await directory;
+    return File('${root.path}${Platform.pathSeparator}preferences.json');
   }
 
   Future<Directory> _ensureDirectory(Directory directory) async {

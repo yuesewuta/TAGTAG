@@ -28,6 +28,7 @@ class TagTagHome extends StatefulWidget {
 
 class _TagTagHomeState extends State<TagTagHome> {
   late final TextEditingController _searchController;
+  late final FocusNode _searchFocusNode;
   bool _dragging = false;
   bool _importDialogOpen = false;
   bool _scanningConsistency = false;
@@ -40,6 +41,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   void initState() {
     super.initState();
     _searchController = TextEditingController(text: controller.searchTerm);
+    _searchFocusNode = FocusNode();
     unawaited(_scanConsistency());
     _consistencyTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -50,6 +52,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _consistencyTimer?.cancel();
     super.dispose();
   }
@@ -83,6 +86,8 @@ class _TagTagHomeState extends State<TagTagHome> {
                     return LayoutBuilder(
                       builder: (context, constraints) {
                         final compact = constraints.maxWidth < 1120;
+                        final navigationCollapsed =
+                            controller.preferences.navigationCollapsed;
                         return Column(
                           children: [
                             _buildCommandBar(compact),
@@ -91,9 +96,27 @@ class _TagTagHomeState extends State<TagTagHome> {
                               child: Row(
                                 children: [
                                   SizedBox(
-                                    width: compact ? 244 : 288,
+                                    width: navigationCollapsed ? 64 : 276,
                                     child: _NavigationPane(
                                       controller: controller,
+                                      collapsed: navigationCollapsed,
+                                      onToggleCollapsed: () => unawaited(
+                                        controller.updatePreferences(
+                                          navigationCollapsed:
+                                              !navigationCollapsed,
+                                        ),
+                                      ),
+                                      onShowTagHierarchy: () {
+                                        if (navigationCollapsed) {
+                                          unawaited(
+                                            controller.updatePreferences(
+                                              navigationCollapsed: false,
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      onSearch: _focusSearch,
+                                      onSettings: _showSettings,
                                     ),
                                   ),
                                   const VerticalDivider(width: 1),
@@ -231,6 +254,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           Expanded(
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode,
               onChanged: controller.setSearchTerm,
               decoration: InputDecoration(
                 isDense: true,
@@ -291,18 +315,49 @@ class _TagTagHomeState extends State<TagTagHome> {
               icon: const Icon(Icons.sell_outlined, size: 18),
               label: const Text('打标签'),
             ),
-            const SizedBox(width: 6),
-            Tooltip(
-              message: '清除所选资源的直接标签',
-              child: IconButton(
-                onPressed: _clearTags,
-                icon: const Icon(Icons.label_off_outlined),
-              ),
-            ),
           ],
         ],
       ),
     );
+  }
+
+  void _focusSearch() {
+    _searchFocusNode.requestFocus();
+  }
+
+  Future<void> _showSettings() async {
+    final result = await showDialog<_SettingsDraft>(
+      context: context,
+      builder: (context) => _SettingsDialog(
+        controller: controller,
+        onRevealStorageRoot: _revealStorageRoot,
+      ),
+    );
+    if (result == null) {
+      return;
+    }
+    await controller.updatePreferences(
+      moveImportsByDefault: result.moveImportsByDefault,
+      navigationCollapsed: result.navigationCollapsed,
+    );
+    if (mounted) {
+      _showMessage('设置已保存。');
+    }
+  }
+
+  Future<void> _revealStorageRoot() async {
+    final root = controller.storageRoot;
+    if (root == null) {
+      _showMessage('存储根尚未初始化。', error: true);
+      return;
+    }
+    try {
+      await widget.fileActions.reveal(root.path);
+    } catch (error) {
+      if (mounted) {
+        _showMessage('打开存储根失败：$error', error: true);
+      }
+    }
   }
 
   Widget _buildResourcePane(bool compact) {
@@ -541,8 +596,13 @@ class _TagTagHomeState extends State<TagTagHome> {
     final result = await showDialog<_ImportDraft>(
       context: context,
       barrierDismissible: false,
-      builder: (context) =>
-          _ImportDialog(controller: controller, sources: sources),
+      builder: (context) => _ImportDialog(
+        controller: controller,
+        sources: sources,
+        initialMode: controller.preferences.moveImportsByDefault
+            ? ImportMode.move
+            : ImportMode.copy,
+      ),
     );
     if (mounted) {
       setState(() => _importDialogOpen = false);
@@ -1037,42 +1097,70 @@ class _BrandMark extends StatelessWidget {
 }
 
 class _NavigationPane extends StatelessWidget {
-  const _NavigationPane({required this.controller});
+  const _NavigationPane({
+    required this.controller,
+    required this.collapsed,
+    required this.onToggleCollapsed,
+    required this.onShowTagHierarchy,
+    required this.onSearch,
+    required this.onSettings,
+  });
 
   final TagTagController controller;
+  final bool collapsed;
+  final VoidCallback onToggleCollapsed;
+  final VoidCallback onShowTagHierarchy;
+  final VoidCallback onSearch;
+  final VoidCallback onSettings;
 
   @override
   Widget build(BuildContext context) {
     final activeSpaceId = controller.activeSpaceId;
+    final activeSpaceName = controller.activeSpace?.name ?? '标签空间';
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-          child: DropdownButtonFormField<String>(
-            initialValue: activeSpaceId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              isDense: true,
-              prefixIcon: Icon(Icons.space_dashboard_outlined, size: 20),
+        if (collapsed)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: PopupMenuButton<String>(
+              tooltip: activeSpaceName,
+              icon: const Icon(Icons.space_dashboard_outlined),
+              onSelected: (value) => unawaited(controller.selectSpace(value)),
+              itemBuilder: (context) => [
+                for (final space in controller.state.spaces)
+                  PopupMenuItem(value: space.id, child: Text(space.name)),
+              ],
             ),
-            items: controller.state.spaces
-                .map(
-                  (space) => DropdownMenuItem(
-                    value: space.id,
-                    child: Text(space.name, overflow: TextOverflow.ellipsis),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              if (value != null) {
-                unawaited(controller.selectSpace(value));
-              }
-            },
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: DropdownButtonFormField<String>(
+              initialValue: activeSpaceId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.space_dashboard_outlined, size: 20),
+              ),
+              items: controller.state.spaces
+                  .map(
+                    (space) => DropdownMenuItem(
+                      value: space.id,
+                      child: Text(space.name, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  unawaited(controller.selectSpace(value));
+                }
+              },
+            ),
           ),
-        ),
         _NavItem(
           icon: Icons.folder_copy_outlined,
           label: '全部资源',
+          collapsed: collapsed,
           selected:
               controller.activePlacementId == null &&
               !controller.showRecent &&
@@ -1080,55 +1168,93 @@ class _NavigationPane extends StatelessWidget {
           onTap: () => controller.selectPlacement(null),
         ),
         _NavItem(
+          icon: Icons.account_tree_outlined,
+          label: '标签层级',
+          collapsed: collapsed,
+          selected: controller.activePlacementId != null,
+          onTap: onShowTagHierarchy,
+        ),
+        _NavItem(
           icon: Icons.inbox_outlined,
           label: '待整理',
+          collapsed: collapsed,
           selected: controller.showInbox,
           onTap: controller.showInboxResources,
         ),
         _NavItem(
           icon: Icons.history_outlined,
           label: '最近',
+          collapsed: collapsed,
           selected: controller.showRecent,
           onTap: controller.showRecentResources,
         ),
-        const Divider(height: 24),
-        Padding(
-          padding: const EdgeInsets.only(left: 14, right: 8),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  '标签层级',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-                ),
-              ),
-              Tooltip(
-                message: '新建根标签',
-                child: IconButton(
-                  iconSize: 19,
-                  onPressed: () => _home(context)?._showCreateTag(),
-                  icon: const Icon(Icons.add),
-                ),
-              ),
-            ],
-          ),
+        _NavItem(
+          icon: Icons.search,
+          label: '搜索',
+          collapsed: collapsed,
+          selected: controller.searchTerm.isNotEmpty,
+          onTap: onSearch,
         ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.only(bottom: 10),
-            children: controller.rootPlacements
-                .map(
-                  (placement) => _TagNode(
-                    controller: controller,
-                    placement: placement,
-                    depth: 0,
+        if (collapsed)
+          const Spacer()
+        else ...[
+          const Divider(height: 22),
+          Padding(
+            padding: const EdgeInsets.only(left: 14, right: 8),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    '标签层级',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
                   ),
-                )
-                .toList(),
+                ),
+                Tooltip(
+                  message: '新建根标签',
+                  child: IconButton(
+                    iconSize: 19,
+                    onPressed: () => _home(context)?._showCreateTag(),
+                    icon: const Icon(Icons.add),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 10),
+              children: controller.rootPlacements
+                  .map(
+                    (placement) => _TagNode(
+                      controller: controller,
+                      placement: placement,
+                      depth: 0,
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
+        const Divider(height: 1),
+        _NavItem(
+          icon: Icons.settings_outlined,
+          label: '设置',
+          collapsed: collapsed,
+          selected: false,
+          onTap: onSettings,
+        ),
+        Tooltip(
+          message: collapsed ? '展开导航' : '折叠导航',
+          child: IconButton(
+            onPressed: onToggleCollapsed,
+            icon: Icon(
+              collapsed
+                  ? Icons.keyboard_double_arrow_right
+                  : Icons.keyboard_double_arrow_left,
+            ),
           ),
         ),
-        const Divider(height: 1),
-        _CommonTags(controller: controller),
+        const SizedBox(height: 6),
       ],
     );
   }
@@ -1141,17 +1267,42 @@ class _NavItem extends StatelessWidget {
   const _NavItem({
     required this.icon,
     required this.label,
+    required this.collapsed,
     required this.selected,
     required this.onTap,
   });
 
   final IconData icon;
   final String label;
+  final bool collapsed;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
+    if (collapsed) {
+      return Tooltip(
+        message: label,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Material(
+            color: selected
+                ? Theme.of(context).colorScheme.primaryContainer
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(5),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(5),
+              onTap: onTap,
+              child: SizedBox(
+                width: 48,
+                height: 42,
+                child: Icon(icon, size: 20),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return ListTile(
       dense: true,
       selected: selected,
@@ -1254,51 +1405,6 @@ class _TagNode extends StatelessWidget {
 
 enum _TagAction { addChild, edit, delete }
 
-class _CommonTags extends StatelessWidget {
-  const _CommonTags({required this.controller});
-
-  final TagTagController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final placements = controller.commonPlacements;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            '常用标签',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 7),
-          if (placements.isEmpty)
-            const Text('标注后会出现在这里', style: TextStyle(fontSize: 12))
-          else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: placements
-                  .map(
-                    (placement) => ActionChip(
-                      avatar: _TagDot(
-                        colorValue: controller
-                            .tagForPlacement(placement)
-                            .colorValue,
-                        size: 10,
-                      ),
-                      label: Text(controller.tagForPlacement(placement).name),
-                      onPressed: () => controller.selectPlacement(placement.id),
-                    ),
-                  )
-                  .toList(),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _ResourceHeader extends StatelessWidget {
   const _ResourceHeader({required this.compact});
 
@@ -1314,7 +1420,7 @@ class _ResourceHeader extends StatelessWidget {
           const Expanded(flex: 4, child: _ColumnLabel('名称')),
           if (!compact) const Expanded(flex: 3, child: _ColumnLabel('直接标签')),
           const Expanded(flex: 2, child: _ColumnLabel('修改时间')),
-          const SizedBox(width: 40),
+          const SizedBox(width: 76),
         ],
       ),
     );
@@ -1451,36 +1557,28 @@ class _ResourceRow extends StatelessWidget {
                 ),
               ),
               SizedBox(
-                width: 40,
-                child: PopupMenuButton<_ResourceAction>(
-                  tooltip: '资源操作',
-                  icon: const Icon(Icons.more_horiz, size: 19),
-                  onSelected: (action) {
-                    switch (action) {
-                      case _ResourceAction.open:
-                        unawaited(onOpen());
-                        break;
-                      case _ResourceAction.reveal:
-                        unawaited(onReveal());
-                        break;
-                    }
-                  },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(
-                      value: _ResourceAction.open,
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.open_in_new),
-                        title: Text('打开'),
+                width: 76,
+                child: Row(
+                  children: [
+                    IconButton(
+                      tooltip: '打开',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
                       ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => unawaited(onOpen()),
+                      icon: const Icon(Icons.open_in_new, size: 18),
                     ),
-                    PopupMenuItem(
-                      value: _ResourceAction.reveal,
-                      child: ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(Icons.folder_open_outlined),
-                        title: Text('在资源管理器中定位'),
+                    IconButton(
+                      tooltip: '在资源管理器中定位',
+                      constraints: const BoxConstraints.tightFor(
+                        width: 36,
+                        height: 36,
                       ),
+                      padding: EdgeInsets.zero,
+                      onPressed: () => unawaited(onReveal()),
+                      icon: const Icon(Icons.folder_open_outlined, size: 18),
                     ),
                   ],
                 ),
@@ -1492,8 +1590,6 @@ class _ResourceRow extends StatelessWidget {
     );
   }
 }
-
-enum _ResourceAction { open, reveal }
 
 class _PlacementChip extends StatelessWidget {
   const _PlacementChip({
@@ -1604,6 +1700,7 @@ class _InspectorPane extends StatelessWidget {
           (resource) => controller.selectedResourceIds.contains(resource.id),
         )
         .toList();
+    final selectedTags = _selectionTags(selectedResources);
     final activePlacement = controller.activePlacementId == null
         ? null
         : controller.state.placementById(controller.activePlacementId!);
@@ -1662,24 +1759,30 @@ class _InspectorPane extends StatelessWidget {
               ),
             )
           else ...[
-            Text('直接标签', style: Theme.of(context).textTheme.labelMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _selectionTags(selectedResources),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '直接标签',
+                    style: Theme.of(context).textTheme.labelMedium,
+                  ),
+                ),
+                if (selectedTags.isNotEmpty)
+                  IconButton(
+                    tooltip: '清除全部直接标签',
+                    onPressed: onClearTags,
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.label_off_outlined, size: 18),
+                  ),
+              ],
             ),
+            const SizedBox(height: 8),
+            Wrap(spacing: 6, runSpacing: 6, children: selectedTags),
             const SizedBox(height: 16),
             FilledButton.icon(
               onPressed: onQuickTag,
               icon: const Icon(Icons.sell_outlined, size: 18),
               label: const Text('添加标签'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: onClearTags,
-              icon: const Icon(Icons.label_off_outlined, size: 18),
-              label: const Text('清除直接标签'),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -1970,21 +2073,137 @@ class _TagDialogState extends State<_TagDialog> {
   }
 }
 
+class _SettingsDialog extends StatefulWidget {
+  const _SettingsDialog({
+    required this.controller,
+    required this.onRevealStorageRoot,
+  });
+
+  final TagTagController controller;
+  final Future<void> Function() onRevealStorageRoot;
+
+  @override
+  State<_SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<_SettingsDialog> {
+  late bool _moveImportsByDefault;
+  late bool _navigationCollapsed;
+
+  @override
+  void initState() {
+    super.initState();
+    _moveImportsByDefault = widget.controller.preferences.moveImportsByDefault;
+    _navigationCollapsed = widget.controller.preferences.navigationCollapsed;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rootPath = widget.controller.storageRoot?.path ?? '尚未初始化';
+    return AlertDialog(
+      title: const Text('设置'),
+      content: SizedBox(
+        width: 540,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('存储根目录', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 7),
+            Row(
+              children: [
+                Expanded(
+                  child: SelectableText(
+                    rootPath,
+                    maxLines: 2,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                IconButton(
+                  tooltip: '在资源管理器中打开',
+                  onPressed: () => unawaited(widget.onRevealStorageRoot()),
+                  icon: const Icon(Icons.folder_open_outlined),
+                ),
+              ],
+            ),
+            const Divider(height: 28),
+            Text('默认导入方式', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 8),
+            SegmentedButton<bool>(
+              segments: const [
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.content_copy_outlined),
+                  label: Text('复制'),
+                ),
+                ButtonSegment(
+                  value: true,
+                  icon: Icon(Icons.drive_file_move_outline),
+                  label: Text('移动'),
+                ),
+              ],
+              selected: {_moveImportsByDefault},
+              onSelectionChanged: (value) =>
+                  setState(() => _moveImportsByDefault = value.first),
+            ),
+            const Divider(height: 28),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('默认折叠左侧导航'),
+              value: _navigationCollapsed,
+              onChanged: (value) =>
+                  setState(() => _navigationCollapsed = value),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.pop(
+            context,
+            _SettingsDraft(
+              moveImportsByDefault: _moveImportsByDefault,
+              navigationCollapsed: _navigationCollapsed,
+            ),
+          ),
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('保存'),
+        ),
+      ],
+    );
+  }
+}
+
 class _ImportDialog extends StatefulWidget {
-  const _ImportDialog({required this.controller, required this.sources});
+  const _ImportDialog({
+    required this.controller,
+    required this.sources,
+    required this.initialMode,
+  });
 
   final TagTagController controller;
   final List<FileSystemEntity> sources;
+  final ImportMode initialMode;
 
   @override
   State<_ImportDialog> createState() => _ImportDialogState();
 }
 
 class _ImportDialogState extends State<_ImportDialog> {
-  ImportMode _mode = ImportMode.copy;
+  late ImportMode _mode;
   String _targetDirectory = '';
   String? _targetError;
   final Set<String> _placementIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _mode = widget.initialMode;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2186,6 +2405,16 @@ class _TagDraft {
   final String name;
   final int colorValue;
   final String? reuseTagId;
+}
+
+class _SettingsDraft {
+  const _SettingsDraft({
+    required this.moveImportsByDefault,
+    required this.navigationCollapsed,
+  });
+
+  final bool moveImportsByDefault;
+  final bool navigationCollapsed;
 }
 
 enum _ImportSourceKind { files, folder }
