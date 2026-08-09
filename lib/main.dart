@@ -11,15 +11,26 @@ import 'storage/library_locator.dart';
 import 'storage/managed_library.dart';
 import 'ui/home_screen.dart';
 
+typedef StorageRootPicker = Future<String?> Function();
+
+Future<String?> _pickStorageRoot() {
+  return getDirectoryPath(confirmButtonText: '选择此文件夹');
+}
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(TagTagApp(locator: LibraryLocator()));
 }
 
 class TagTagApp extends StatefulWidget {
-  const TagTagApp({super.key, required this.locator});
+  const TagTagApp({
+    super.key,
+    required this.locator,
+    this.storageRootPicker = _pickStorageRoot,
+  });
 
   final LibraryLocator locator;
+  final StorageRootPicker storageRootPicker;
 
   @override
   State<TagTagApp> createState() => _TagTagAppState();
@@ -69,8 +80,7 @@ class _TagTagAppState extends State<TagTagApp> {
   }
 
   Future<void> _chooseAndInitialize() async {
-    final selectedPath = await getDirectoryPath(confirmButtonText: '选择此文件夹');
-    if (selectedPath == null || !mounted) {
+    if (_initializing) {
       return;
     }
     setState(() {
@@ -79,6 +89,14 @@ class _TagTagAppState extends State<TagTagApp> {
     });
     ManagedLibrary? library;
     try {
+      final selectedPath = await widget.storageRootPicker();
+      if (!mounted) {
+        return;
+      }
+      if (selectedPath == null) {
+        setState(() => _initializing = false);
+        return;
+      }
       library = await ManagedLibrary.initialize(Directory(selectedPath));
       await widget.locator.saveRoot(library.root);
       await _activate(library);
@@ -89,7 +107,7 @@ class _TagTagAppState extends State<TagTagApp> {
       if (mounted) {
         setState(() {
           _initializing = false;
-          _error = '初始化失败：$error';
+          _error = '无法选择或初始化存储根：$error';
         });
       }
     }
