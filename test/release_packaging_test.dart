@@ -64,6 +64,9 @@ void main() {
 
   test('installer preserves per-user data and shares the app mutex', () async {
     final installer = await File('installer/tagtag.iss').readAsString();
+    final chineseMessages = await File(
+      'installer/languages/ChineseSimplified.isl',
+    ).readAsString();
     final runner = await File('windows/runner/main.cpp').readAsString();
     final mutexMatch = RegExp(
       r'kSingleInstanceMutexName\[\]\s*=\s*L"([^"]+)"',
@@ -84,6 +87,11 @@ void main() {
       r'{localappdata}\Programs\TAGTAG',
     );
     expect(installer, contains(r'Source: "{#SourceDir}\*"'));
+    expect(
+      installer,
+      contains(r'MessagesFile: "languages\ChineseSimplified.isl"'),
+    );
+    expect(chineseMessages, startsWith('; *** Inno Setup version 6.5.0+'));
     expect(installer, isNot(contains('[UninstallDelete]')));
   });
 }

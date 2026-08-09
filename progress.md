@@ -372,3 +372,6 @@
 - 阶段 15 的便携 ZIP、Inno Setup 安装器和 GitHub Release 双资产配置已完成；安装/升级/卸载的真实执行仍等待 GitHub Windows runner，阶段保持进行中且不创建发布标签。
 - 提交 `daab472` 已推送到 `origin/codex/managed-storage-core`；推送前 fetch 确认远程分支与本地基线一致。
 - 已通过登录状态的 GitHub Actions 页面尝试手动触发，但默认分支 `main` 仍只有初始提交，页面尚不识别功能分支中的 workflow。当前分支领先 `main` 11 个提交；未擅自合并默认分支或创建 `v*` 发布标签。
+- 用户确认后，`main` 已从初始提交安全快进到 `b1c4342`，随后手动触发 GitHub `Windows release #1`（run `31321052471`）。
+- 第一次远程运行完成分析、61 项测试、Windows 构建、插件检查、便携打包和 Inno Setup 6.7.1 安装，但在编译安装器时因 runner 不包含 `Languages/ChineseSimplified.isl` 失败；后续步骤未执行。
+- 已从 Inno Setup 官方仓库固定提交 `6054ca127cb6e4fa041350406287b997c4b54a9d` 将简体中文消息文件纳入 `installer/languages/`，并改为本地相对引用与回归校验。

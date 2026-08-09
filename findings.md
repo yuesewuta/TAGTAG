@@ -11,6 +11,7 @@
 - 发布 workflow 使用同一 AppId 连续静默安装两次来覆盖原地升级路径，再静默卸载；便携目录、安装目录和升级后目录都复用原生插件打包冒烟检查。
 - 发布配置回归测试使用 Dart YAML 解析器读取 workflow，并让 PowerShell AST parser 逐段解析所有 `pwsh` 块；同时校验 Inno Setup 与 Windows runner 使用同一个单实例互斥锁。
 - GitHub 默认分支 `main` 当前仍只有初始提交，Actions 页面不会识别仅存在于功能分支的 `workflow_dispatch`；需先合并当前分支到默认分支，或由明确的 `v*` 标签触发标签构建。
+- GitHub `Windows release #1` 已验证 Inno Setup 6.7.1 可以运行，但 Chocolatey 安装不附带 `Languages/ChineseSimplified.isl`；简体中文消息文件需固定在仓库内，不能依赖 runner 可选语言包。
 
 ## 2026-08-09 一致性告警处理
 
