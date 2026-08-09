@@ -4,37 +4,25 @@ import 'dart:io';
 import '../models/tag_models.dart';
 
 class UserPreferences {
-  const UserPreferences({
-    this.moveImportsByDefault = false,
-    this.navigationCollapsed = false,
-  });
+  const UserPreferences({this.moveImportsByDefault = false});
 
   final bool moveImportsByDefault;
-  final bool navigationCollapsed;
 
-  UserPreferences copyWith({
-    bool? moveImportsByDefault,
-    bool? navigationCollapsed,
-  }) => UserPreferences(
+  UserPreferences copyWith({bool? moveImportsByDefault}) => UserPreferences(
     moveImportsByDefault: moveImportsByDefault ?? this.moveImportsByDefault,
-    navigationCollapsed: navigationCollapsed ?? this.navigationCollapsed,
   );
 
   Map<String, dynamic> toJson() => {
     'version': 1,
     'moveImportsByDefault': moveImportsByDefault,
-    'navigationCollapsed': navigationCollapsed,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
-    if (json['version'] != 1 ||
-        json['moveImportsByDefault'] is! bool ||
-        json['navigationCollapsed'] is! bool) {
+    if (json['version'] != 1 || json['moveImportsByDefault'] is! bool) {
       throw const FormatException('TAGTAG 设置文件无效');
     }
     return UserPreferences(
       moveImportsByDefault: json['moveImportsByDefault'] as bool,
-      navigationCollapsed: json['navigationCollapsed'] as bool,
     );
   }
 }

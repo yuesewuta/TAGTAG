@@ -9,6 +9,8 @@ import '../data/local_store.dart';
 import '../models/tag_models.dart';
 import '../storage/managed_library.dart';
 
+enum ResourceView { all, hierarchy, inbox, recent, search }
+
 class TagTagController extends ChangeNotifier {
   TagTagController({required this.store, this.library});
 
@@ -21,11 +23,12 @@ class TagTagController extends ChangeNotifier {
   String? activePlacementId;
   String searchTerm = '';
   bool includeDescendants = true;
-  bool showRecent = false;
-  bool showInbox = false;
+  ResourceView activeView = ResourceView.all;
 
   AppState get state => _state;
   UserPreferences get preferences => _preferences;
+  bool get showRecent => activeView == ResourceView.recent;
+  bool get showInbox => activeView == ResourceView.inbox;
   Directory? get storageRoot => library?.root;
   String? get activeSpaceId => _state.activeSpaceId;
   TagSpace? get activeSpace {
@@ -47,13 +50,9 @@ class TagTagController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updatePreferences({
-    bool? moveImportsByDefault,
-    bool? navigationCollapsed,
-  }) async {
+  Future<void> updatePreferences({bool? moveImportsByDefault}) async {
     _preferences = _preferences.copyWith(
       moveImportsByDefault: moveImportsByDefault,
-      navigationCollapsed: navigationCollapsed,
     );
     notifyListeners();
     await store.savePreferences(_preferences);
@@ -93,7 +92,9 @@ class TagTagController extends ChangeNotifier {
     if (spaceId == null) {
       return const [];
     }
-    final query = searchTerm.trim().toLowerCase();
+    final query = activeView == ResourceView.search
+        ? searchTerm.trim().toLowerCase()
+        : '';
     final matchingIds = _matchingResourceIds();
     final memberResourceIds = _state.resourceIdsForSpace(spaceId);
     final resources = _state.resources
@@ -172,32 +173,77 @@ class TagTagController extends ChangeNotifier {
         .toList();
   }
 
+  List<TagResource> resourcesForPlacement(TagPlacement placement) {
+    final spaceId = activeSpaceId;
+    if (spaceId == null || placement.spaceId != spaceId) {
+      return const [];
+    }
+    final placementIds = placementsInActiveSpace
+        .where((item) => item.tagId == placement.tagId)
+        .map((item) => item.id)
+        .toSet();
+    final assignedResourceIds = _state.assignments
+        .where((assignment) => placementIds.contains(assignment.placementId))
+        .map((assignment) => assignment.resourceId)
+        .toSet();
+    final memberResourceIds = _state.resourceIdsForSpace(spaceId);
+    final resources = _state.resources
+        .where((resource) => memberResourceIds.contains(resource.id))
+        .where((resource) => assignedResourceIds.contains(resource.id))
+        .toList();
+    resources.sort(
+      (first, second) =>
+          first.name.toLowerCase().compareTo(second.name.toLowerCase()),
+    );
+    return resources;
+  }
+
   Future<void> selectSpace(String spaceId) async {
     activePlacementId = null;
     selectedResourceIds.clear();
-    showRecent = false;
-    showInbox = false;
+    activeView = ResourceView.all;
     await _update(_state.copyWith(activeSpaceId: spaceId));
   }
 
   void selectPlacement(String? placementId) {
     activePlacementId = placementId;
-    showRecent = false;
-    showInbox = false;
+    activeView = placementId == null
+        ? ResourceView.all
+        : ResourceView.hierarchy;
+    notifyListeners();
+  }
+
+  void showAllResources() {
+    activePlacementId = null;
+    activeView = ResourceView.all;
+    selectedResourceIds.clear();
+    notifyListeners();
+  }
+
+  void showTagHierarchy() {
+    activeView = ResourceView.hierarchy;
+    selectedResourceIds.clear();
     notifyListeners();
   }
 
   void showRecentResources() {
     activePlacementId = null;
-    showRecent = true;
-    showInbox = false;
+    activeView = ResourceView.recent;
+    selectedResourceIds.clear();
     notifyListeners();
   }
 
   void showInboxResources() {
     activePlacementId = null;
-    showRecent = false;
-    showInbox = true;
+    activeView = ResourceView.inbox;
+    selectedResourceIds.clear();
+    notifyListeners();
+  }
+
+  void showSearchResources() {
+    activePlacementId = null;
+    activeView = ResourceView.search;
+    selectedResourceIds.clear();
     notifyListeners();
   }
 
@@ -220,6 +266,13 @@ class TagTagController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectResource(String resourceId) {
+    selectedResourceIds
+      ..clear()
+      ..add(resourceId);
+    notifyListeners();
+  }
+
   void clearSelection() {
     selectedResourceIds.clear();
     notifyListeners();
@@ -237,6 +290,7 @@ class TagTagController extends ChangeNotifier {
     );
     activePlacementId = null;
     selectedResourceIds.clear();
+    activeView = ResourceView.all;
     await _update(
       _state.copyWith(
         spaces: [..._state.spaces, space],
@@ -792,14 +846,15 @@ class TagTagController extends ChangeNotifier {
     }
     activePlacementId = null;
     selectedResourceIds.clear();
+    activeView = ResourceView.all;
     await _update(restored);
   }
 
   Set<String>? _matchingResourceIds() {
-    if (showRecent) {
+    if (activeView == ResourceView.recent) {
       return recentResources.map((resource) => resource.id).toSet();
     }
-    if (showInbox) {
+    if (activeView == ResourceView.inbox) {
       final spaceId = activeSpaceId;
       if (spaceId == null) {
         return <String>{};

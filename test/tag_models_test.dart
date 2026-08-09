@@ -8,7 +8,7 @@ import 'package:tagtag/state/tagtag_controller.dart';
 import 'package:tagtag/storage/managed_library.dart';
 
 void main() {
-  test('user preferences persist import and navigation defaults', () async {
+  test('user preferences persist the default import mode', () async {
     final directory = await Directory.systemTemp.createTemp(
       'tagtag-preferences-',
     );
@@ -16,16 +16,28 @@ void main() {
     final store = LocalStore(baseDirectory: directory);
 
     await store.savePreferences(
-      const UserPreferences(
-        moveImportsByDefault: true,
-        navigationCollapsed: true,
-      ),
+      const UserPreferences(moveImportsByDefault: true),
     );
 
     final loaded = await LocalStore(baseDirectory: directory).loadPreferences();
     expect(loaded.moveImportsByDefault, isTrue);
-    expect(loaded.navigationCollapsed, isTrue);
   });
+
+  test(
+    'normal selection replaces while explicit multi-selection accumulates',
+    () {
+      final controller = TagTagController(store: LocalStore());
+
+      controller.selectResource('resource-one');
+      controller.selectResource('resource-two');
+
+      expect(controller.selectedResourceIds, {'resource-two'});
+
+      controller.toggleResourceSelection('resource-one', true);
+
+      expect(controller.selectedResourceIds, {'resource-one', 'resource-two'});
+    },
+  );
 
   test(
     'one tag entity can appear at two paths while same names stay independent',
@@ -77,6 +89,34 @@ void main() {
       expect(secondPathIds, isNot(contains('resource-notes')));
     },
   );
+
+  test('hierarchy nodes share resources by tag entity identity', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'tagtag-hierarchy-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final controller = TagTagController(
+      store: LocalStore(baseDirectory: directory),
+    );
+    await controller.store.save(AppState.demo());
+    await controller.load();
+
+    final first = controller.resourcesForPlacement(
+      controller.state.placementById('place-project-design-reference'),
+    );
+    final second = controller.resourcesForPlacement(
+      controller.state.placementById('place-personal-reading-reference'),
+    );
+
+    expect(first.map((resource) => resource.id).toSet(), {
+      'resource-architecture',
+      'resource-comparison',
+    });
+    expect(second.map((resource) => resource.id).toSet(), {
+      'resource-architecture',
+      'resource-comparison',
+    });
+  });
 
   test(
     'deleting one tag placement promotes children and preserves tag resources',

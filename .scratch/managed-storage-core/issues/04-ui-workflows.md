@@ -19,3 +19,6 @@ Connect mandatory initialization, main-window import, storage browsing, untagged
 - 2026-08-09: Release-window visual verification passed at 1280x720 without overlap or clipping.
 - 2026-08-09: Replaced the resource overflow menu with direct open/reveal icons, added the six-entry collapsible navigation and persistent settings dialog, and moved clear-direct-tags to a secondary inspector icon.
 - 2026-08-09: Real row double-clicks opened all three managed TXT files, including two Chinese filenames; 1280x720 and 960x720 expanded/collapsed layouts passed `PrintWindow` inspection.
+- 2026-08-09: Corrected navigation semantics: collapse is local view state, space switching and direct file/folder imports moved to the app bar, and search/tag hierarchy are independent content pages.
+- 2026-08-09: Removed the inspector, exposed five direct actions per resource, added explicit multi-select mode, and verified normal clicks retain only the latest selection.
+- 2026-08-09: The hierarchy page now recursively expands tag paths, shows tag-entity resource counts, and renders each tag's directly assigned resources inline.
