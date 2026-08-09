@@ -122,8 +122,8 @@
 - [x] 保留 Windows x64 便携 ZIP
 - [x] 使用安装器工具生成 Windows `setup.exe`
 - [x] 在标签构建中同时上传安装版和便携版到 GitHub Release
-- [ ] 验证安装、卸载、升级和便携运行
-- **状态：** in_progress
+- [x] 验证安装、卸载、升级和便携运行
+- **状态：** complete
 
 ## 关键问题
 1. “DeClutter github”具体指哪个仓库或产品，是否存在同名项目歧义？

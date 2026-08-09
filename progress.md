@@ -375,3 +375,7 @@
 - 用户确认后，`main` 已从初始提交安全快进到 `b1c4342`，随后手动触发 GitHub `Windows release #1`（run `31321052471`）。
 - 第一次远程运行完成分析、61 项测试、Windows 构建、插件检查、便携打包和 Inno Setup 6.7.1 安装，但在编译安装器时因 runner 不包含 `Languages/ChineseSimplified.isl` 失败；后续步骤未执行。
 - 已从 Inno Setup 官方仓库固定提交 `6054ca127cb6e4fa041350406287b997c4b54a9d` 将简体中文消息文件纳入 `installer/languages/`，并改为本地相对引用与回归校验。
+- 修复提交 `9734117` 已同步到 `origin/codex/managed-storage-core` 和 `origin/main`，随后手动触发 GitHub `Windows release #2`（run `31321467268`）。
+- 第二次远程运行成功，持续 4 分 54 秒；61 项测试、Windows Release、插件打包、便携包解压检查、安装器首次安装、同 AppId 原地升级和静默卸载全部通过。
+- GitHub Actions 已上传 artifact `TAGTAG-windows-x64`（23.9 MB，SHA-256 `789e83073ea3293c7f875b96be95b51da09c4849c4b09ed824aea0b699e00c5f`）；上传步骤引用已验证的便携 ZIP 与 `setup.exe` 两个输出。手动运行未创建正式 Release，标签发布步骤按设计跳过。
+- 阶段 15 完成；正式发布仍需用户明确创建 `vMAJOR.MINOR.PATCH` 标签，workflow 届时会把安装版和便携版同时附加到 GitHub Release。
