@@ -37,38 +37,54 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final sandbox = await Directory.systemTemp.createTemp(
-      'tagtag-consistency-dialog-',
-    );
+    final fixture = await tester.runAsync(() async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-consistency-dialog-',
+      );
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/source.txt');
+      await source.writeAsString('external move');
+      final library = await ManagedLibrary.initialize(root);
+      final store = LocalStore(
+        baseDirectory: Directory('${sandbox.path}/config'),
+      );
+      await store.save(AppState.demo());
+      final controller = TagTagController(store: store, library: library);
+      await controller.load();
+      final imported = await controller.importManagedResource(
+        source: source,
+        targetDirectory: '',
+      );
+      await File(imported.path).rename('${root.path}/renamed.txt');
+      return (sandbox: sandbox, library: library, controller: controller);
+    });
+    final sandbox = fixture!.sandbox;
+    final library = fixture.library;
+    final controller = fixture.controller;
     addTearDown(() => sandbox.delete(recursive: true));
-    final root = Directory('${sandbox.path}/library');
-    final source = File('${sandbox.path}/source.txt');
-    await source.writeAsString('external move');
-    final library = await ManagedLibrary.initialize(root);
     addTearDown(library.close);
-    final store = LocalStore(
-      baseDirectory: Directory('${sandbox.path}/config'),
-    );
-    await store.save(AppState.demo());
-    final controller = TagTagController(store: store, library: library);
-    await controller.load();
-    final imported = await controller.importManagedResource(
-      source: source,
-      targetDirectory: '',
-    );
-    await File(imported.path).rename('${root.path}/renamed.txt');
 
     await tester.pumpWidget(
       MaterialApp(
         home: TagTagHome(
           controller: controller,
           fileActions: WindowsFileActions(),
+          onRestoreGlobalBackup: (_, _) async {},
         ),
       ),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('一致性告警'));
+    await tester.tap(find.byTooltip('备份与恢复'));
+    await tester.pumpAndSettle();
+    expect(find.text('创建完整备份'), findsOneWidget);
+    expect(find.text('从完整备份恢复'), findsOneWidget);
+    await tester.tapAt(const Offset(80, 160));
+    await tester.pumpAndSettle();
+
+    final consistencyButton = find.byTooltip('一致性告警');
+    await _pumpUntilFound(tester, consistencyButton);
+    await tester.tap(consistencyButton);
     await tester.pumpAndSettle();
 
     expect(find.text('发现未受管内容'), findsOneWidget);
@@ -86,4 +102,17 @@ void main() {
 class _EmptyLibraryLocator extends LibraryLocator {
   @override
   Future<Directory?> loadRoot() async => null;
+}
+
+Future<void> _pumpUntilFound(WidgetTester tester, Finder finder) async {
+  for (var attempt = 0; attempt < 50; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump();
+    if (finder.evaluate().isNotEmpty) {
+      return;
+    }
+  }
+  fail('Timed out waiting for the expected widget');
 }

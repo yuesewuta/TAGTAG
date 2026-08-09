@@ -4,7 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 import 'package:tagtag/data/local_store.dart';
 import 'package:tagtag/models/tag_models.dart';
+import 'package:tagtag/services/global_backup_restorer.dart';
 import 'package:tagtag/state/tagtag_controller.dart';
+import 'package:tagtag/storage/library_locator.dart';
 import 'package:tagtag/storage/managed_library.dart';
 
 void main() {
@@ -402,6 +404,73 @@ void main() {
     );
     expect(
       controller.state.assignments
+          .where((assignment) => assignment.resourceId == imported.id)
+          .map((assignment) => assignment.placementId),
+      {'place-project'},
+    );
+  });
+
+  test('global backup restore persists tag state and preferences', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-domain-global-restore-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final sourceFile = File('${sandbox.path}/source.txt');
+    await sourceFile.writeAsString('global restore');
+    final sourceLibrary = await ManagedLibrary.initialize(
+      Directory('${sandbox.path}/source-library'),
+    );
+    final sourceStore = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/source-config'),
+    );
+    await sourceStore.save(AppState.demo());
+    final sourceController = TagTagController(
+      store: sourceStore,
+      library: sourceLibrary,
+    );
+    await sourceController.load();
+    await sourceController.updatePreferences(moveImportsByDefault: true);
+    final imported = await sourceController.importManagedResource(
+      source: sourceFile,
+      targetDirectory: '',
+      placementIds: const {'place-project'},
+    );
+    final backup = await sourceController.createBackup(
+      Directory('${sandbox.path}/backups'),
+    );
+    await sourceLibrary.close();
+    final restoredStore = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/restored-config'),
+    );
+    final locator = LibraryLocator(
+      configDirectory: Directory('${sandbox.path}/locator'),
+    );
+    await locator.saveRoot(sourceLibrary.root);
+    final restoredRoot = Directory('${sandbox.path}/restored-library');
+
+    final session =
+        await GlobalBackupRestorer(
+          locator: locator,
+          store: restoredStore,
+        ).restore(
+          backupDirectory: backup,
+          targetRoot: restoredRoot,
+          currentRoot: sourceLibrary.root,
+        );
+    addTearDown(session.library.close);
+    final restoredController = session.controller;
+
+    expect(restoredController.preferences.moveImportsByDefault, isTrue);
+    expect(
+      (await locator.loadRoot())?.path,
+      path.normalize(restoredRoot.absolute.path),
+    );
+    expect(
+      restoredController.state.resources.map((resource) => resource.id),
+      contains(imported.id),
+    );
+    expect(
+      restoredController.state.assignments
           .where((assignment) => assignment.resourceId == imported.id)
           .map((assignment) => assignment.placementId),
       {'place-project'},

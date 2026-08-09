@@ -1,10 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqlite3/sqlite3.dart';
 
-import '../models/tag_models.dart' show newId;
+import '../models/tag_models.dart' show AppState, newId;
 
 enum ImportMode { copy, move }
 
@@ -92,6 +93,36 @@ class ConsistencyFinding {
   final String relativePath;
   final String? resourceId;
   final DateTime detectedAt;
+}
+
+class BackupValidationResult {
+  const BackupValidationResult({
+    required this.backupDirectory,
+    required this.formatVersion,
+    required this.createdAt,
+    required this.resourceCount,
+    required this.tagStateJson,
+    required this.preferencesJson,
+  });
+
+  final Directory backupDirectory;
+  final int formatVersion;
+  final DateTime createdAt;
+  final int resourceCount;
+  final String tagStateJson;
+  final String? preferencesJson;
+}
+
+class BackupRestoreResult {
+  const BackupRestoreResult({
+    required this.root,
+    required this.tagStateJson,
+    required this.preferencesJson,
+  });
+
+  final Directory root;
+  final String tagStateJson;
+  final String? preferencesJson;
 }
 
 class ManagedLibrary {
@@ -1678,11 +1709,13 @@ class ManagedLibrary {
       final manifest = File(
         path.join(temporaryDirectory.path, 'manifest.json'),
       );
+      final entries = await _collectBackupEntries(temporaryDirectory);
       await manifest.writeAsString(
         const JsonEncoder.withIndent('  ').convert({
-          'formatVersion': 1,
+          'formatVersion': 2,
           'createdAt': createdAt.toIso8601String(),
           'resourceCount': resources.length,
+          'entries': [for (final entry in entries) entry.toJson()],
           'resources': [
             for (final resource in resources)
               {
@@ -1699,6 +1732,267 @@ class ManagedLibrary {
     } catch (_) {
       if (await temporaryDirectory.exists()) {
         await temporaryDirectory.delete(recursive: true);
+      }
+      rethrow;
+    }
+  }
+
+  static Future<BackupValidationResult> validateBackup(
+    Directory backupDirectory,
+  ) async {
+    final backup = Directory(path.normalize(backupDirectory.absolute.path));
+    if (!await backup.exists()) {
+      throw FileSystemException('找不到全局备份目录', backup.path);
+    }
+    final manifestFile = File(path.join(backup.path, 'manifest.json'));
+    if (!await manifestFile.exists()) {
+      throw const FormatException('全局备份缺少 manifest.json');
+    }
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(await manifestFile.readAsString());
+    } on FormatException catch (error) {
+      throw FormatException('全局备份清单不是有效 JSON：${error.message}');
+    }
+    if (decoded is! Map<String, dynamic>) {
+      throw const FormatException('全局备份清单必须是 JSON 对象');
+    }
+    if (decoded['formatVersion'] != 2) {
+      throw FormatException('不支持的全局备份格式版本：${decoded['formatVersion']}');
+    }
+    final createdAtValue = decoded['createdAt'];
+    final resourceCount = decoded['resourceCount'];
+    final entryValues = decoded['entries'];
+    final resourceValues = decoded['resources'];
+    if (createdAtValue is! String ||
+        resourceCount is! int ||
+        resourceCount < 0 ||
+        entryValues is! List<dynamic> ||
+        resourceValues is! List<dynamic> ||
+        resourceValues.length != resourceCount) {
+      throw const FormatException('全局备份清单字段无效');
+    }
+    final createdAt = DateTime.tryParse(createdAtValue);
+    if (createdAt == null) {
+      throw const FormatException('全局备份创建时间无效');
+    }
+
+    final entries = <String, _BackupEntry>{};
+    for (final value in entryValues) {
+      if (value is! Map<String, dynamic>) {
+        throw const FormatException('全局备份条目必须是 JSON 对象');
+      }
+      final entry = _BackupEntry.fromJson(value);
+      if (entries[entry.relativePath] != null) {
+        throw FormatException('全局备份清单包含重复路径：${entry.relativePath}');
+      }
+      entries[entry.relativePath] = entry;
+    }
+    if (entries['metadata/$_databaseFileName']?.kind !=
+            FileSystemEntityType.file ||
+        entries['metadata/tag-state.json']?.kind != FileSystemEntityType.file) {
+      throw const FormatException('全局备份缺少 SQLite 或标签状态');
+    }
+
+    final actualEntries = {
+      for (final entry in await _collectBackupEntries(backup))
+        entry.relativePath: entry,
+    };
+    if (entries.keys
+            .toSet()
+            .difference(actualEntries.keys.toSet())
+            .isNotEmpty ||
+        actualEntries.keys
+            .toSet()
+            .difference(entries.keys.toSet())
+            .isNotEmpty) {
+      throw const FormatException('全局备份内容与清单条目不一致');
+    }
+    for (final entry in entries.values) {
+      final actual = actualEntries[entry.relativePath]!;
+      if (actual.kind != entry.kind) {
+        throw FormatException('全局备份条目类型不一致：${entry.relativePath}');
+      }
+      if (entry.kind == FileSystemEntityType.file &&
+          (actual.sizeBytes != entry.sizeBytes ||
+              actual.sha256Digest != entry.sha256Digest)) {
+        throw FormatException('全局备份文件校验失败：${entry.relativePath}');
+      }
+    }
+
+    final databasePath = path.join(backup.path, 'metadata', _databaseFileName);
+    final database = sqlite3.open(databasePath, mode: OpenMode.readOnly);
+    try {
+      final integrity = database.select('PRAGMA integrity_check');
+      if (integrity.length != 1 || integrity.single.values.single != 'ok') {
+        throw const FormatException('全局备份 SQLite 完整性校验失败');
+      }
+      final rows = database.select(
+        'SELECT id, relative_path, kind FROM resources',
+      );
+      if (rows.length != resourceCount) {
+        throw const FormatException('全局备份资源数量与 SQLite 不一致');
+      }
+      final manifestResources = <String, ({String path, String kind})>{};
+      for (final value in resourceValues) {
+        if (value is! Map<String, dynamic> ||
+            value['id'] is! String ||
+            value['relativePath'] is! String ||
+            value['kind'] is! String) {
+          throw const FormatException('全局备份资源清单无效');
+        }
+        final resourcePath = _normalizeRelativePath(
+          value['relativePath'] as String,
+        );
+        final kind = value['kind'] as String;
+        if (kind != 'file' && kind != 'folder') {
+          throw const FormatException('全局备份资源类型无效');
+        }
+        final id = value['id'] as String;
+        if (manifestResources[id] != null) {
+          throw const FormatException('全局备份资源清单包含重复 ID');
+        }
+        manifestResources[id] = (path: resourcePath, kind: kind);
+      }
+      for (final row in rows) {
+        final id = row['id'] as String;
+        final relativePath = row['relative_path'] as String;
+        final kind = row['kind'] as String;
+        final manifestResource = manifestResources[id];
+        if (manifestResource == null ||
+            manifestResource.path != relativePath ||
+            manifestResource.kind != kind) {
+          throw const FormatException('全局备份资源清单与 SQLite 不一致');
+        }
+        final entry = entries['resources/$relativePath'];
+        final expectedType = kind == 'file'
+            ? FileSystemEntityType.file
+            : FileSystemEntityType.directory;
+        if (entry?.kind != expectedType) {
+          throw FormatException('全局备份缺少资源内容：$relativePath');
+        }
+      }
+    } finally {
+      database.close();
+    }
+
+    final tagStateFile = File(
+      path.join(backup.path, 'metadata', 'tag-state.json'),
+    );
+    final tagStateJson = await tagStateFile.readAsString();
+    try {
+      final tagState = jsonDecode(tagStateJson);
+      if (tagState is! Map<String, dynamic>) {
+        throw const FormatException('标签状态必须是 JSON 对象');
+      }
+      AppState.fromJson(tagState);
+    } on Object catch (error) {
+      throw FormatException('全局备份标签状态无效：$error');
+    }
+    final preferencesFile = File(
+      path.join(backup.path, 'metadata', 'preferences.json'),
+    );
+    final preferencesJson = await preferencesFile.exists()
+        ? await preferencesFile.readAsString()
+        : null;
+    return BackupValidationResult(
+      backupDirectory: backup,
+      formatVersion: 2,
+      createdAt: createdAt.toUtc(),
+      resourceCount: resourceCount,
+      tagStateJson: tagStateJson,
+      preferencesJson: preferencesJson,
+    );
+  }
+
+  static Future<BackupRestoreResult> restoreBackup(
+    Directory backupDirectory,
+    Directory targetRoot,
+  ) async {
+    final validation = await validateBackup(backupDirectory);
+    final target = Directory(path.normalize(targetRoot.absolute.path));
+    final backup = validation.backupDirectory;
+    if (path.equals(target.path, backup.path) ||
+        path.isWithin(backup.path, target.path)) {
+      throw ArgumentError.value(targetRoot.path, 'targetRoot', '恢复目标不能位于备份目录内');
+    }
+    final targetType = await FileSystemEntity.type(
+      target.path,
+      followLinks: false,
+    );
+    if (targetType != FileSystemEntityType.notFound &&
+        targetType != FileSystemEntityType.directory) {
+      throw FileSystemException('恢复目标必须是目录', target.path);
+    }
+    final targetExisted = targetType == FileSystemEntityType.directory;
+    if (targetExisted && !(await target.list(followLinks: false).isEmpty)) {
+      throw FileSystemException('恢复目标必须是新的空目录', target.path);
+    }
+    final parent = Directory(path.dirname(target.path));
+    await parent.create(recursive: true);
+    final staging = Directory(
+      path.join(
+        parent.path,
+        '.${path.basename(target.path)}-${newId('restore')}.tmp',
+      ),
+    );
+    if (await staging.exists()) {
+      throw FileSystemException('恢复临时目录已存在', staging.path);
+    }
+
+    try {
+      await Directory(
+        path.join(staging.path, _metadataDirectoryName),
+      ).create(recursive: true);
+      await File(path.join(backup.path, 'metadata', _databaseFileName)).copy(
+        path.join(staging.path, _metadataDirectoryName, _databaseFileName),
+      );
+      final resourcesDirectory = Directory(path.join(backup.path, 'resources'));
+      await for (final child in resourcesDirectory.list(followLinks: false)) {
+        final type = await FileSystemEntity.type(
+          child.path,
+          followLinks: false,
+        );
+        if (type != FileSystemEntityType.file &&
+            type != FileSystemEntityType.directory) {
+          throw FileSystemException('备份资源包含不支持的链接或条目', child.path);
+        }
+        await _copyEntity(
+          child.path,
+          path.join(staging.path, path.basename(child.path)),
+          type,
+        );
+      }
+
+      final restoredLibrary = await ManagedLibrary.open(staging);
+      try {
+        final findings = await restoredLibrary.scanConsistency();
+        if (findings.isNotEmpty) {
+          throw const FormatException('恢复后的资料库未通过资源一致性校验');
+        }
+      } finally {
+        await restoredLibrary.close();
+      }
+
+      if (targetExisted) {
+        await target.delete();
+      }
+      try {
+        await staging.rename(target.path);
+      } catch (_) {
+        if (targetExisted && !await target.exists()) {
+          await target.create();
+        }
+        rethrow;
+      }
+      return BackupRestoreResult(
+        root: Directory(target.path),
+        tagStateJson: validation.tagStateJson,
+        preferencesJson: validation.preferencesJson,
+      );
+    } catch (_) {
+      if (await staging.exists()) {
+        await staging.delete(recursive: true);
       }
       rethrow;
     }
@@ -1756,6 +2050,63 @@ class ManagedLibrary {
         childType,
       );
     }
+  }
+
+  static Future<List<_BackupEntry>> _collectBackupEntries(
+    Directory backupRoot,
+  ) async {
+    final entries = <_BackupEntry>[];
+    for (final directoryName in const ['metadata', 'resources']) {
+      final directory = Directory(path.join(backupRoot.path, directoryName));
+      if (!await directory.exists()) {
+        continue;
+      }
+      await for (final entity in directory.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        final type = await FileSystemEntity.type(
+          entity.path,
+          followLinks: false,
+        );
+        if (type != FileSystemEntityType.file &&
+            type != FileSystemEntityType.directory) {
+          throw FormatException('全局备份包含不支持的链接或条目：${entity.path}');
+        }
+        final relativePath = path
+            .relative(entity.path, from: backupRoot.path)
+            .replaceAll('\\', '/');
+        if (type == FileSystemEntityType.directory) {
+          entries.add(
+            _BackupEntry(
+              relativePath: relativePath,
+              kind: type,
+              sizeBytes: null,
+              sha256Digest: null,
+            ),
+          );
+        } else {
+          final file = File(entity.path);
+          entries.add(
+            _BackupEntry(
+              relativePath: relativePath,
+              kind: type,
+              sizeBytes: await file.length(),
+              sha256Digest: await _sha256File(file),
+            ),
+          );
+        }
+      }
+    }
+    entries.sort(
+      (left, right) => left.relativePath.compareTo(right.relativePath),
+    );
+    return entries;
+  }
+
+  static Future<String> _sha256File(File file) async {
+    final digests = sha256.bind(file.openRead());
+    return (await digests.first).toString();
   }
 
   static Future<void> _deleteEntity(
@@ -1940,5 +2291,67 @@ class ManagedLibrary {
         context_json TEXT
       )
     ''');
+  }
+}
+
+class _BackupEntry {
+  const _BackupEntry({
+    required this.relativePath,
+    required this.kind,
+    required this.sizeBytes,
+    required this.sha256Digest,
+  });
+
+  final String relativePath;
+  final FileSystemEntityType kind;
+  final int? sizeBytes;
+  final String? sha256Digest;
+
+  Map<String, dynamic> toJson() => {
+    'path': relativePath,
+    'kind': kind == FileSystemEntityType.file ? 'file' : 'folder',
+    if (kind == FileSystemEntityType.file) ...{
+      'sizeBytes': sizeBytes,
+      'sha256': sha256Digest,
+    },
+  };
+
+  factory _BackupEntry.fromJson(Map<String, dynamic> json) {
+    final relativePath = json['path'];
+    final kindValue = json['kind'];
+    if (relativePath is! String || kindValue is! String) {
+      throw const FormatException('全局备份条目字段无效');
+    }
+    final normalized = path.posix.normalize(relativePath);
+    if (relativePath.contains('\\') ||
+        normalized != relativePath ||
+        path.posix.isAbsolute(normalized) ||
+        normalized == '.' ||
+        normalized == '..' ||
+        normalized.startsWith('../') ||
+        (!normalized.startsWith('metadata/') &&
+            !normalized.startsWith('resources/'))) {
+      throw FormatException('全局备份条目路径无效：$relativePath');
+    }
+    final kind = switch (kindValue) {
+      'file' => FileSystemEntityType.file,
+      'folder' => FileSystemEntityType.directory,
+      _ => throw FormatException('全局备份条目类型无效：$kindValue'),
+    };
+    final sizeBytes = json['sizeBytes'];
+    final digest = json['sha256'];
+    if (kind == FileSystemEntityType.file &&
+        (sizeBytes is! int ||
+            sizeBytes < 0 ||
+            digest is! String ||
+            !RegExp(r'^[0-9a-f]{64}$').hasMatch(digest))) {
+      throw FormatException('全局备份文件摘要无效：$relativePath');
+    }
+    return _BackupEntry(
+      relativePath: normalized,
+      kind: kind,
+      sizeBytes: kind == FileSystemEntityType.file ? sizeBytes as int : null,
+      sha256Digest: kind == FileSystemEntityType.file ? digest as String : null,
+    );
   }
 }

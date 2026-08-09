@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
 import 'package:sqlite3/sqlite3.dart';
+import 'package:tagtag/models/tag_models.dart';
 import 'package:tagtag/storage/library_locator.dart';
 import 'package:tagtag/storage/managed_library.dart';
 
@@ -1074,12 +1076,16 @@ void main() {
 
       final backup = await library.createBackup(
         Directory('${sandbox.path}/backups'),
-        metadataDocuments: const {
-          'tag-state.json': '{"activeSpaceId":"space-design"}',
+        metadataDocuments: {
+          'tag-state.json': jsonEncode(AppState.empty().toJson()),
         },
       );
 
+      final validation = await ManagedLibrary.validateBackup(backup);
+
       expect(await File('${backup.path}/manifest.json').exists(), isTrue);
+      expect(validation.formatVersion, 2);
+      expect(validation.resourceCount, 1);
       expect(
         await File('${backup.path}/metadata/tagtag.sqlite').exists(),
         isTrue,
@@ -1092,10 +1098,86 @@ void main() {
       );
       expect(
         await File('${backup.path}/metadata/tag-state.json').readAsString(),
-        '{"activeSpaceId":"space-design"}',
+        jsonEncode(AppState.empty().toJson()),
+      );
+
+      await File(
+        '${backup.path}/resources/docs/backup-me.txt',
+      ).writeAsString('tampered backup bytes');
+      await expectLater(
+        ManagedLibrary.validateBackup(backup),
+        throwsA(isA<FormatException>()),
       );
     },
   );
+
+  test('a validated global backup restores into a new empty root', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-backup-restore-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final sourceRoot = Directory('${sandbox.path}/source-library');
+    final source = Directory('${sandbox.path}/source-folder');
+    await source.create();
+    await File('${source.path}/note.txt').writeAsString('restored bytes');
+    final library = await ManagedLibrary.initialize(sourceRoot);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: 'docs',
+      mode: ImportMode.move,
+    );
+    final tagStateJson = jsonEncode(AppState.empty().toJson());
+    final backup = await library.createBackup(
+      Directory('${sandbox.path}/backups'),
+      metadataDocuments: {'tag-state.json': tagStateJson},
+    );
+    await library.close();
+    final targetRoot = Directory('${sandbox.path}/restored-library');
+    await targetRoot.create();
+
+    final restored = await ManagedLibrary.restoreBackup(backup, targetRoot);
+
+    expect(restored.root.path, path.normalize(targetRoot.absolute.path));
+    expect(restored.tagStateJson, tagStateJson);
+    expect(
+      await File(
+        '${targetRoot.path}/docs/source-folder/note.txt',
+      ).readAsString(),
+      'restored bytes',
+    );
+    final reopened = await ManagedLibrary.open(targetRoot);
+    addTearDown(reopened.close);
+    expect((await reopened.listResources()).single.id, imported.id);
+    expect(await reopened.scanConsistency(), isEmpty);
+  });
+
+  test('global backup restore refuses a non-empty target root', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-backup-restore-conflict-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final library = await ManagedLibrary.initialize(
+      Directory('${sandbox.path}/library'),
+    );
+    final backup = await library.createBackup(
+      Directory('${sandbox.path}/backups'),
+      metadataDocuments: {
+        'tag-state.json': jsonEncode(AppState.empty().toJson()),
+      },
+    );
+    await library.close();
+    final targetRoot = Directory('${sandbox.path}/occupied');
+    await targetRoot.create();
+    final existing = File('${targetRoot.path}/existing.txt');
+    await existing.writeAsString('do not overwrite');
+
+    await expectLater(
+      ManagedLibrary.restoreBackup(backup, targetRoot),
+      throwsA(isA<FileSystemException>()),
+    );
+
+    expect(await existing.readAsString(), 'do not overwrite');
+  });
 
   test(
     'library locator persists the initialized root across restart',

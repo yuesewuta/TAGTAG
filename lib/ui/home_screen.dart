@@ -17,10 +17,13 @@ class TagTagHome extends StatefulWidget {
     super.key,
     required this.controller,
     required this.fileActions,
+    required this.onRestoreGlobalBackup,
   });
 
   final TagTagController controller;
   final WindowsFileActions fileActions;
+  final Future<void> Function(Directory backup, Directory targetRoot)
+  onRestoreGlobalBackup;
 
   @override
   State<TagTagHome> createState() => _TagTagHomeState();
@@ -34,6 +37,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   bool _scanningConsistency = false;
   bool _navigationExpanded = false;
   bool _multiSelectMode = false;
+  bool _restoringBackup = false;
   List<ConsistencyFinding> _consistencyFindings = const [];
   Timer? _consistencyTimer;
 
@@ -205,10 +209,41 @@ class _TagTagHomeState extends State<TagTagHome> {
               ),
             ),
           ),
-        IconButton(
-          tooltip: '创建备份',
-          onPressed: _createBackup,
-          icon: const Icon(Icons.backup_outlined),
+        PopupMenuButton<_BackupCommand>(
+          tooltip: '备份与恢复',
+          enabled: !_restoringBackup,
+          onSelected: (command) {
+            switch (command) {
+              case _BackupCommand.create:
+                unawaited(_createBackup());
+              case _BackupCommand.restore:
+                unawaited(_restoreGlobalBackup());
+            }
+          },
+          itemBuilder: (context) => const [
+            PopupMenuItem(
+              value: _BackupCommand.create,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.backup_outlined),
+                title: Text('创建完整备份'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BackupCommand.restore,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.restore_outlined),
+                title: Text('从完整备份恢复'),
+              ),
+            ),
+          ],
+          icon: _restoringBackup
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.backup_outlined),
         ),
         IconButton(
           tooltip: '操作日志',
@@ -911,6 +946,55 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
   }
 
+  Future<void> _restoreGlobalBackup() async {
+    final backupPath = await getDirectoryPath(confirmButtonText: '选择完整备份目录');
+    if (backupPath == null || !mounted) {
+      return;
+    }
+    BackupValidationResult validation;
+    try {
+      validation = await controller.validateGlobalBackup(Directory(backupPath));
+    } catch (error) {
+      _showMessage('备份校验失败：$error', error: true);
+      return;
+    }
+    final targetPath = await getDirectoryPath(
+      initialDirectory: controller.storageRoot?.parent.path,
+      confirmButtonText: '选择新的空存储根',
+      canCreateDirectories: true,
+    );
+    if (targetPath == null || !mounted) {
+      return;
+    }
+    final confirmed = await _confirm(
+      title: '恢复完整备份？',
+      message:
+          '备份时间：${validation.createdAt.toLocal()}\n'
+          '资源数量：${validation.resourceCount}\n'
+          '新存储根：$targetPath\n\n'
+          '只允许恢复到空目录。成功后 TAGTAG 将切换到新存储根。',
+      actionLabel: '校验并恢复',
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+    setState(() => _restoringBackup = true);
+    try {
+      await widget.onRestoreGlobalBackup(
+        validation.backupDirectory,
+        Directory(targetPath),
+      );
+      if (mounted) {
+        _showMessage('完整备份恢复成功。');
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() => _restoringBackup = false);
+        _showMessage('恢复失败：$error', error: true);
+      }
+    }
+  }
+
   Future<void> _showOperationLog() async {
     await showDialog<void>(
       context: context,
@@ -1233,37 +1317,40 @@ class _ConsistencyDialogState extends State<_ConsistencyDialog> {
             ),
           ),
           const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              OutlinedButton.icon(
-                onPressed: _busy || resourceId == null || selected == null
-                    ? null
-                    : () => _runAction(
-                        () => widget.controller.acceptExternalMove(
-                          resourceId,
-                          selected,
+          SizedBox(
+            width: 168,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _busy || resourceId == null || selected == null
+                      ? null
+                      : () => _runAction(
+                          () => widget.controller.acceptExternalMove(
+                            resourceId,
+                            selected,
+                          ),
+                          '已接受资源的新路径。',
                         ),
-                        '已接受资源的新路径。',
-                      ),
-                icon: const Icon(Icons.link_outlined, size: 18),
-                label: const Text('接受新路径'),
-              ),
-              const SizedBox(height: 6),
-              OutlinedButton.icon(
-                onPressed: _busy || resourceId == null || selected == null
-                    ? null
-                    : () => _runAction(
-                        () => widget.controller.restoreExternalMove(
-                          resourceId,
-                          selected,
+                  icon: const Icon(Icons.link_outlined, size: 18),
+                  label: const Text('接受新路径'),
+                ),
+                const SizedBox(height: 6),
+                OutlinedButton.icon(
+                  onPressed: _busy || resourceId == null || selected == null
+                      ? null
+                      : () => _runAction(
+                          () => widget.controller.restoreExternalMove(
+                            resourceId,
+                            selected,
+                          ),
+                          '已恢复到记录路径。',
                         ),
-                        '已恢复到记录路径。',
-                      ),
-                icon: const Icon(Icons.settings_backup_restore, size: 18),
-                label: const Text('恢复记录路径'),
-              ),
-            ],
+                  icon: const Icon(Icons.settings_backup_restore, size: 18),
+                  label: const Text('恢复记录路径'),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -2056,7 +2143,7 @@ class _ResourceActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 242,
+      width: 280,
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
@@ -2116,8 +2203,11 @@ class _ActionIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: tooltip,
-      constraints: const BoxConstraints.tightFor(width: 34, height: 36),
-      padding: EdgeInsets.zero,
+      style: IconButton.styleFrom(
+        fixedSize: const Size(40, 40),
+        padding: EdgeInsets.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      ),
       onPressed: onPressed == null ? null : () => unawaited(onPressed!()),
       icon: Icon(icon, size: 18),
     );
@@ -2837,6 +2927,8 @@ class _SettingsDraft {
 }
 
 enum _ImportSourceKind { files, folder }
+
+enum _BackupCommand { create, restore }
 
 class _ImportDraft {
   const _ImportDraft({

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import 'data/local_store.dart';
 import 'platform/windows_file_actions.dart';
+import 'services/global_backup_restorer.dart';
 import 'state/tagtag_controller.dart';
 import 'storage/library_locator.dart';
 import 'storage/managed_library.dart';
@@ -27,10 +28,12 @@ class TagTagApp extends StatefulWidget {
     super.key,
     required this.locator,
     this.storageRootPicker = _pickStorageRoot,
+    this.store,
   });
 
   final LibraryLocator locator;
   final StorageRootPicker storageRootPicker;
+  final LocalStore? store;
 
   @override
   State<TagTagApp> createState() => _TagTagAppState();
@@ -116,8 +119,9 @@ class _TagTagAppState extends State<TagTagApp> {
   }
 
   Future<void> _activate(ManagedLibrary library) async {
+    final previousLibrary = _library;
     final controller = TagTagController(
-      store: LocalStore(),
+      store: widget.store ?? LocalStore(),
       library: library,
       recycleBin: _fileActions,
     );
@@ -133,6 +137,43 @@ class _TagTagAppState extends State<TagTagApp> {
       _initializing = false;
       _error = null;
     });
+    if (previousLibrary != null && previousLibrary != library) {
+      await previousLibrary.close();
+    }
+  }
+
+  Future<void> _restoreGlobalBackup(
+    Directory backupDirectory,
+    Directory targetRoot,
+  ) async {
+    final currentController = _controller;
+    final currentLibrary = _library;
+    if (currentController == null || currentLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final session =
+        await GlobalBackupRestorer(
+          locator: widget.locator,
+          store: currentController.store,
+        ).restore(
+          backupDirectory: backupDirectory,
+          targetRoot: targetRoot,
+          currentRoot: currentLibrary.root,
+          recycleBin: _fileActions,
+        );
+    if (!mounted) {
+      await session.library.close();
+      return;
+    }
+    final previousLibrary = _library;
+    setState(() {
+      _library = session.library;
+      _controller = session.controller;
+      _error = null;
+    });
+    if (previousLibrary != null && previousLibrary != session.library) {
+      await previousLibrary.close();
+    }
   }
 
   @override
@@ -186,7 +227,11 @@ class _TagTagAppState extends State<TagTagApp> {
     }
     final controller = _controller;
     if (controller != null) {
-      return TagTagHome(controller: controller, fileActions: _fileActions);
+      return TagTagHome(
+        controller: controller,
+        fileActions: _fileActions,
+        onRestoreGlobalBackup: _restoreGlobalBackup,
+      );
     }
     return _LibrarySetupScreen(
       busy: _initializing,

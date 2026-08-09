@@ -331,3 +331,42 @@
 - 新增两条覆盖保护回归：移出未跟踪内容不会覆盖外部目标，恢复记录路径不会覆盖后来占用的原路径；冲突双方内容和操作日志均保持不变。
 - 阶段 13 最终验证：Dart 格式检查 0 改动，`flutter analyze --no-pub` 0 问题，全量测试 55/55，通过最终 Windows Release 构建，原生插件打包检查为 GREEN。
 - 首次 `git add` 因沙箱禁止创建 `.git/index.lock` 而失败，工作区内容未受影响；改用受控 Git 写权限完成提交。
+
+## 会话：2026-08-09（全局备份恢复）
+
+- 用户要求继续功能开发，并明确后续 GitHub Release 需要提供 Windows 安装版；阶段 15 已记录安装版与便携版双产物要求。
+- 阶段 14 先完成全局备份恢复闭环。恢复目标限定为新的空目录，先校验清单、SHA-256、SQLite 和标签状态，再通过临时目录恢复并切换应用存储根，不覆盖正在使用的资料库。
+- 备份 v2 校验测试按预期红灯：缺少 `ManagedLibrary.validateBackup`；现有 v1 manifest 无法检测资源字节篡改。
+- v2 manifest、路径安全、精确条目、SHA-256、SQLite `integrity_check` 和标签状态解析已实现；原始备份通过且篡改资源测试转绿。
+- 全局恢复测试按预期红灯：缺少 `ManagedLibrary.restoreBackup`；下一步恢复到已验证为空的新目标根。
+- 恢复实现首次编译误用了不存在的 `Stream.isNotEmpty`；测试未进入文件操作，改为对 `Stream.isEmpty` 结果取反后重跑。
+- 全局备份恢复到新空根和非空目标拒绝测试均已通过；恢复后的 SQLite 可重新打开，资源 ID、目录层级和字节完整，一致性扫描为空。
+- 控制器恢复元数据测试按预期红灯：缺少 `persistRestoredBackupMetadata`；完整备份还需加入用户设置文档。
+- 完整备份现包含 `preferences.json`；恢复后的标签状态、空间关系、资源 ID 和默认导入设置持久化测试已通过。
+- 恢复协调器和 UI 首轮静态分析仅报告一个未使用的 Windows 文件操作导入；接口类型实际由 `managed_library.dart` 提供，删除后重跑。
+- 应用级恢复协调器测试已通过：成功恢复后全局根配置切换到新目录，控制器直接加载恢复的资源、标签关系和设置。
+- 一次组合格式/分析工具调用因结果变量名写错未返回输出；改正编排变量后重跑，格式 0 改动、静态分析 0 问题。
+- 960×720 UI 测试通过，顶部“备份与恢复”菜单同时显示创建和恢复入口；全量测试 58/58 通过。
+- 阶段 14 Windows Release 构建完成，`data/app.so` 已更新，原生插件打包检查为 GREEN。
+
+## 会话：2026-08-09（GitHub 安装版与便携版）
+
+- 阶段 15 使用 Inno Setup 生成当前用户级 Windows x64 安装器，默认安装到 `%LOCALAPPDATA%/Programs/TAGTAG`，不需要管理员权限，卸载不触碰存储根和应用数据。
+- GitHub Actions 已调整为同时生成便携 ZIP 和 `setup.exe`；CI 会分别解压检查便携包，并静默安装、检查插件打包、静默卸载安装版后才上传产物。
+- 阶段 15 已由待处理校正为进行中；当前代码和 workflow 尚未提交。
+- 两次静态校验不能作为有效结论：本机 Python 未安装 `PyYAML`；将整份 YAML 交给 PowerShell parser 只会把 YAML 语法误报为 PowerShell 错误。后续改为真正解析 YAML，并只逐段解析 `pwsh` 脚本块。
+- 本轮 session-catchup 首次仍引用已删除的旧 Python 路径而失败；将通过 `Get-Command python` 使用当前解释器重跑。
+- 曾根据工具输出中的 JSON 转义误判 Inno Setup 文件含双反斜杠；字符计数确认 `AppMutex` 和各路径原本均为正确的单反斜杠，安装脚本保持不变。
+- 两次安装脚本组合补丁分别因字符串转义和模板字符串语法在应用前失败，均未产生文件修改；确认原假设错误后不再尝试该修改。
+- 首次发布配置定向测试在 Dart 解析阶段发现测试辅助代码使用了不合法的尾反斜杠字符串，尚未执行任何产品断言；改用 `String.fromCharCode(92)` 明确表达单反斜杠。
+- `dart.bat` 包装器在组合命令和单文件格式检查中两次无输出等待，均已中止；改用同一 Flutter SDK 内的 `dart.exe` 后立即返回真实结果。
+- 发布配置定向测试首次执行时，YAML 解析和 Inno Setup 边界断言已通过；PowerShell 块遍历因测试代码把 `if-case` 与 `&&` 组合而发生运行时类型错误，改为先读取值再做普通 `is String` 判断。
+- Flutter 命令无输出的根因是沙箱不允许写工作区外 SDK 的 `bin/cache/lockfile`；获得受控权限后，离线 `flutter pub get` 成功并将 `yaml` 固化为直接开发依赖。
+- 修正测试辅助条件后，发布配置定向测试 2/2 通过：YAML 结构、双产物引用、安装/升级/卸载步骤、全部 PowerShell AST、安装器 AppId/互斥锁/当前用户数据边界均通过。
+- 首次全量测试执行到 60 个断言后持续两分钟未退出；最小反馈环确认 `app_initialization_test` 在 widget FakeAsync 区直接等待真实 `Directory.createTemp`，目录虽创建但 Future 不返回。
+- 将完整文件系统/SQLite 测试夹具放入 `tester.runAsync` 后，挂起转为可见红灯，并暴露此前被掩盖的两个 960px 布局错误：七个 Material 3 图标按钮超出资源行动作区，以及一致性缺失行的无宽度操作列产生无限约束。
+- 资源行动作区现按七个 40px 直接图标固定为 280px；一致性操作列固定为 168px。最小 widget 反馈环 1/1 通过，全部 `[DEBUG-a4f2]` 临时标记已清除。
+- 原始全量反馈环恢复正常退出，61/61 测试通过。
+- UI 修复后的首次静态分析只报告测试辅助函数使用已弃用的 `Finder.description`；改为固定超时说明后重跑。
+- 最终本地验证：Dart 格式检查 14 个文件零改动，`flutter analyze --no-pub` 零问题，全量测试 61/61 通过，Windows Release 构建成功，必需插件 DLL 打包检查为 GREEN。
+- 阶段 15 的便携 ZIP、Inno Setup 安装器和 GitHub Release 双资产配置已完成；安装/升级/卸载的真实执行仍等待 GitHub Windows runner，阶段保持进行中且不创建发布标签。

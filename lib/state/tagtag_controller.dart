@@ -935,11 +935,36 @@ class TagTagController extends ChangeNotifier {
         'tag-state.json': const JsonEncoder.withIndent(
           '  ',
         ).convert(_state.toJson()),
+        'preferences.json': const JsonEncoder.withIndent(
+          '  ',
+        ).convert(_preferences.toJson()),
       },
     );
   }
 
-  Future<void> restoreBackup(String path) async {
+  Future<BackupValidationResult> validateGlobalBackup(
+    Directory backupDirectory,
+  ) => ManagedLibrary.validateBackup(backupDirectory);
+
+  Future<void> persistRestoredBackupMetadata(
+    BackupRestoreResult restored,
+  ) async {
+    final stateValue = jsonDecode(restored.tagStateJson);
+    if (stateValue is! Map<String, dynamic>) {
+      throw const FormatException('全局备份标签状态必须是 JSON 对象');
+    }
+    final restoredState = AppState.fromJson(stateValue);
+    final preferencesJson = restored.preferencesJson;
+    final restoredPreferences = preferencesJson == null
+        ? const UserPreferences()
+        : UserPreferences.fromJson(
+            Map<String, dynamic>.from(jsonDecode(preferencesJson) as Map),
+          );
+    await store.save(restoredState);
+    await store.savePreferences(restoredPreferences);
+  }
+
+  Future<void> restoreTagStateBackup(String path) async {
     final restored = await store.readBackup(path);
     if (restored.spaces.isEmpty) {
       throw const FormatException('备份内没有标签空间');

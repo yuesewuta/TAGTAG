@@ -57,23 +57,99 @@ jobs:
         shell: pwsh
         run: ./tool/windows_release_smoke.ps1 -Check Packaging
 
-      - name: Package Windows release
+      - name: Package Windows portable release
         shell: pwsh
         run: |
-          $archive = "TAGTAG-${{ steps.version.outputs.label }}-windows-x64.zip"
+          $archive = "TAGTAG-${{ steps.version.outputs.label }}-windows-x64-portable.zip"
           Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath $archive
-          "archive=$archive" >> $env:GITHUB_OUTPUT
+          "portable=$archive" >> $env:GITHUB_OUTPUT
         id: package
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress --yes
+
+      - name: Build Windows installer
+        id: installer
+        shell: pwsh
+        run: |
+          $iscc = Join-Path ${env:ProgramFiles(x86)} "Inno Setup 6/ISCC.exe"
+          if (-not (Test-Path -LiteralPath $iscc -PathType Leaf)) {
+            throw "Inno Setup compiler was not installed: $iscc"
+          }
+          $sourceDir = (Resolve-Path "build/windows/x64/runner/Release").Path
+          $outputDir = (Get-Location).Path
+          $baseName = "TAGTAG-${{ steps.version.outputs.label }}-windows-x64-setup"
+          & $iscc `
+            "/DAppVersion=${{ steps.version.outputs.build_name }}" `
+            "/DSourceDir=$sourceDir" `
+            "/DOutputDir=$outputDir" `
+            "/DOutputBaseFilename=$baseName" `
+            "installer/tagtag.iss"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup failed with exit code $LASTEXITCODE"
+          }
+          $setup = "$baseName.exe"
+          if (-not (Test-Path -LiteralPath $setup -PathType Leaf)) {
+            throw "Installer output is missing: $setup"
+          }
+          "setup=$setup" >> $env:GITHUB_OUTPUT
+
+      - name: Verify portable archive
+        shell: pwsh
+        run: |
+          $destination = Join-Path $env:RUNNER_TEMP "tagtag-portable-test"
+          Expand-Archive -LiteralPath "${{ steps.package.outputs.portable }}" -DestinationPath $destination
+          ./tool/windows_release_smoke.ps1 -Check Packaging -ExePath (Join-Path $destination "tagtag.exe")
+
+      - name: Verify installer install, upgrade, and uninstall
+        shell: pwsh
+        run: |
+          $installDir = Join-Path $env:RUNNER_TEMP "tagtag-install-test"
+          $setup = (Resolve-Path "${{ steps.installer.outputs.setup }}").Path
+          $installArguments = @(
+            "/VERYSILENT"
+            "/SUPPRESSMSGBOXES"
+            "/NORESTART"
+            "/DIR=$installDir"
+          )
+          foreach ($phase in @("install", "upgrade")) {
+            $process = Start-Process -FilePath $setup -ArgumentList $installArguments -Wait -PassThru
+            if ($process.ExitCode -ne 0) {
+              throw "Installer $phase returned exit code $($process.ExitCode)"
+            }
+            $installedExe = Join-Path $installDir "tagtag.exe"
+            ./tool/windows_release_smoke.ps1 -Check Packaging -ExePath $installedExe
+          }
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+            throw "Uninstaller is missing: $uninstaller"
+          }
+          $uninstall = Start-Process -FilePath $uninstaller -ArgumentList @(
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART"
+          ) -Wait -PassThru
+          if ($uninstall.ExitCode -ne 0) {
+            throw "Uninstaller returned exit code $($uninstall.ExitCode)"
+          }
+          if (Test-Path -LiteralPath $installedExe) {
+            throw "Uninstall left the installed executable behind: $installedExe"
+          }
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: TAGTAG-windows-x64
-          path: ${{ steps.package.outputs.archive }}
+          path: |
+            ${{ steps.package.outputs.portable }}
+            ${{ steps.installer.outputs.setup }}
 
       - name: Publish GitHub Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.package.outputs.archive }}
+          files: |
+            ${{ steps.package.outputs.portable }}
+            ${{ steps.installer.outputs.setup }}
           generate_release_notes: true
