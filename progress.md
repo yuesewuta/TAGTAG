@@ -236,3 +236,4 @@
 - 全套 Flutter 测试 33/33 通过；Windows Release 构建成功，插件打包、目录选择器和单实例恢复冒烟检查全部通过。
 - 首次用 `CopyFromScreen` 捕获 Release 窗口时，前台游戏阻止 `SetForegroundWindow`，截图实际是被遮挡的桌面内容，不能用于布局结论；改用按 TAGTAG 窗口句柄执行 `PrintWindow`。
 - `PrintWindow` 捕获的 1280×720 主窗口及选中资源检查器验证通过；“恢复先前路径并退出管理”按钮完整可见，无文字截断、布局重叠或动态位移。
+- 已创建 `d4d8616`（Windows 插件、目录选择与单实例修复）和 `931ba63`（恢复原路径退出管理）两个提交，并非强制推送到 `origin/codex/managed-storage-core`。
