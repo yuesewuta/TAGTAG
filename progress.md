@@ -379,3 +379,5 @@
 - 第二次远程运行成功，持续 4 分 54 秒；61 项测试、Windows Release、插件打包、便携包解压检查、安装器首次安装、同 AppId 原地升级和静默卸载全部通过。
 - GitHub Actions 已上传 artifact `TAGTAG-windows-x64`（23.9 MB，SHA-256 `789e83073ea3293c7f875b96be95b51da09c4849c4b09ed824aea0b699e00c5f`）；上传步骤引用已验证的便携 ZIP 与 `setup.exe` 两个输出。手动运行未创建正式 Release，标签发布步骤按设计跳过。
 - 阶段 15 完成；正式发布仍需用户明确创建 `vMAJOR.MINOR.PATCH` 标签，workflow 届时会把安装版和便携版同时附加到 GitHub Release。
+- 用户确认首个正式版本为 `v0.1.0`；已在 `main` 提交 `5f38226` 上创建并推送带说明标签，触发 GitHub `Windows release` run `31322065544`。
+- `v0.1.0` 远端构建和发布成功；分析、61 项测试、Windows 编译、插件检查、便携包检查、安装/升级/卸载全部通过。正式 Release 同时提供 `TAGTAG-v0.1.0-windows-x64-portable.zip` 和 `TAGTAG-v0.1.0-windows-x64-setup.exe`。
