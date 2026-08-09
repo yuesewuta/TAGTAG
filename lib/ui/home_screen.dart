@@ -106,6 +106,8 @@ class _TagTagHomeState extends State<TagTagHome> {
                                         controller: controller,
                                         onQuickTag: _showQuickTag,
                                         onClearTags: _clearTags,
+                                        onRestoreOriginal:
+                                            _restoreSelectedToOriginalPath,
                                         onEditTag: _editActiveTag,
                                         onDeleteTag: _deleteActiveTag,
                                       ),
@@ -440,6 +442,30 @@ class _TagTagHomeState extends State<TagTagHome> {
     );
   }
 
+  Future<void> _restoreSelectedToOriginalPath() async {
+    if (controller.selectedResourceIds.length != 1) {
+      _showMessage('恢复先前路径时一次只能选择一个资源。');
+      return;
+    }
+    final resourceId = controller.selectedResourceIds.single;
+    final resource = controller.state.resources.singleWhere(
+      (item) => item.id == resourceId,
+    );
+    final confirmed = await _confirm(
+      title: '恢复先前路径并退出管理？',
+      message:
+          '“${resource.name}”将移动到导入前的位置，并从 TAGTAG 删除标签和空间关系。'
+          '目标存在同名资源时不会覆盖；成功后可在操作日志中撤销。',
+      actionLabel: '恢复并退出',
+    );
+    if (!confirmed) {
+      return;
+    }
+    await _runAction(() async {
+      await controller.restoreResourceToOriginalPath(resourceId);
+    }, successMessage: '已恢复到先前路径并退出 TAGTAG 管理。');
+  }
+
   Future<void> _showCreateSpace() async {
     final name = await _showTextDialog(
       title: '新建标签空间',
@@ -748,6 +774,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           controller: controller,
           onQuickTag: _showQuickTag,
           onClearTags: _clearTags,
+          onRestoreOriginal: _restoreSelectedToOriginalPath,
           onEditTag: _editActiveTag,
           onDeleteTag: _deleteActiveTag,
         ),
@@ -905,20 +932,32 @@ class _OperationLogDialogState extends State<_OperationLogDialog> {
                     itemBuilder: (context, index) {
                       final operation = operations[index];
                       final undone = operation.undoneAt != null;
+                      final IconData icon;
+                      final String title;
+                      final String subtitle;
+                      switch (operation.type) {
+                        case ManagedOperationType.importCopy:
+                          icon = Icons.content_copy_outlined;
+                          title = '复制导入';
+                          subtitle =
+                              '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
+                        case ManagedOperationType.importMove:
+                          icon = Icons.drive_file_move_outline;
+                          title = '移动导入';
+                          subtitle =
+                              '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
+                        case ManagedOperationType.exitRestore:
+                          icon = Icons.logout;
+                          title = '恢复原路径退出管理';
+                          subtitle =
+                              '存储根 / ${operation.destinationRelativePath}\n恢复到 ${operation.sourcePath}';
+                      }
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
-                        leading: Icon(
-                          operation.type == ManagedOperationType.importCopy
-                              ? Icons.content_copy_outlined
-                              : Icons.drive_file_move_outline,
-                        ),
-                        title: Text(
-                          operation.type == ManagedOperationType.importCopy
-                              ? '复制导入'
-                              : '移动导入',
-                        ),
+                        leading: Icon(icon),
+                        title: Text(title),
                         subtitle: Text(
-                          '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}',
+                          subtitle,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1546,6 +1585,7 @@ class _InspectorPane extends StatelessWidget {
     required this.controller,
     required this.onQuickTag,
     required this.onClearTags,
+    required this.onRestoreOriginal,
     required this.onEditTag,
     required this.onDeleteTag,
   });
@@ -1553,6 +1593,7 @@ class _InspectorPane extends StatelessWidget {
   final TagTagController controller;
   final VoidCallback onQuickTag;
   final VoidCallback onClearTags;
+  final VoidCallback onRestoreOriginal;
   final VoidCallback onEditTag;
   final VoidCallback onDeleteTag;
 
@@ -1639,6 +1680,12 @@ class _InspectorPane extends StatelessWidget {
               onPressed: onClearTags,
               icon: const Icon(Icons.label_off_outlined, size: 18),
               label: const Text('清除直接标签'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: onRestoreOriginal,
+              icon: const Icon(Icons.logout, size: 18),
+              label: const Text('恢复先前路径并退出管理'),
             ),
             const Divider(height: 28),
             Text('所选资源', style: Theme.of(context).textTheme.labelMedium),

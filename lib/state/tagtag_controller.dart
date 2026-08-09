@@ -563,14 +563,112 @@ class TagTagController extends ChangeNotifier {
     return managedLibrary.listOperations();
   }
 
+  Future<ManagedOperation> restoreResourceToOriginalPath(
+    String resourceId,
+  ) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final contextJson = jsonEncode({
+      'memberships': [
+        for (final membership in _state.memberships)
+          if (membership.resourceId == resourceId) membership.toJson(),
+      ],
+      'assignments': [
+        for (final assignment in _state.assignments)
+          if (assignment.resourceId == resourceId) assignment.toJson(),
+      ],
+      'usageEvents': [
+        for (final event in _state.usageEvents)
+          if (event.resourceId == resourceId) event.toJson(),
+      ],
+    });
+    final operation = await managedLibrary.restoreToOriginalPath(
+      resourceId,
+      contextJson: contextJson,
+    );
+    await _syncManagedResources();
+    notifyListeners();
+    return operation;
+  }
+
   Future<void> undoOperation(String operationId) async {
     final managedLibrary = library;
     if (managedLibrary == null) {
       throw StateError('TAGTAG 存储根尚未初始化');
     }
+    final operations = await managedLibrary.listOperations();
+    final matches = operations.where(
+      (operation) => operation.id == operationId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(operationId, 'operationId', '找不到操作记录');
+    }
+    final operation = matches.single;
     await managedLibrary.undo(operationId);
     await _syncManagedResources();
+    if (operation.type == ManagedOperationType.exitRestore &&
+        operation.contextJson != null) {
+      await _restoreExitContext(operation);
+    }
     notifyListeners();
+  }
+
+  Future<void> _restoreExitContext(ManagedOperation operation) async {
+    final snapshot = Map<String, dynamic>.from(
+      jsonDecode(operation.contextJson!) as Map,
+    );
+    final validSpaceIds = _state.spaces.map((space) => space.id).toSet();
+    final validPlacementIds = _state.placements
+        .map((placement) => placement.id)
+        .toSet();
+    final memberships = (snapshot['memberships'] as List<dynamic>? ?? const [])
+        .map(
+          (item) =>
+              SpaceMembership.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .where((membership) => validSpaceIds.contains(membership.spaceId));
+    final assignments = (snapshot['assignments'] as List<dynamic>? ?? const [])
+        .map(
+          (item) =>
+              TagAssignment.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .where(
+          (assignment) => validPlacementIds.contains(assignment.placementId),
+        );
+    final usageEvents = (snapshot['usageEvents'] as List<dynamic>? ?? const [])
+        .map(
+          (item) => UsageEvent.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .where(
+          (event) =>
+              validSpaceIds.contains(event.spaceId) &&
+              (event.placementId == null ||
+                  validPlacementIds.contains(event.placementId)),
+        );
+    await _update(
+      _state.copyWith(
+        memberships: [
+          ..._state.memberships.where(
+            (membership) => membership.resourceId != operation.resourceId,
+          ),
+          ...memberships,
+        ],
+        assignments: [
+          ..._state.assignments.where(
+            (assignment) => assignment.resourceId != operation.resourceId,
+          ),
+          ...assignments,
+        ],
+        usageEvents: [
+          ..._state.usageEvents.where(
+            (event) => event.resourceId != operation.resourceId,
+          ),
+          ...usageEvents,
+        ],
+      ),
+    );
   }
 
   Future<List<ConsistencyFinding>> scanConsistency() async {
@@ -765,6 +863,13 @@ class TagTagController extends ChangeNotifier {
       memberships: memberships,
       assignments: _state.assignments
           .where((assignment) => resourceIds.contains(assignment.resourceId))
+          .toList(),
+      usageEvents: _state.usageEvents
+          .where(
+            (event) =>
+                event.resourceId == null ||
+                resourceIds.contains(event.resourceId),
+          )
           .toList(),
     );
     await store.save(_state);

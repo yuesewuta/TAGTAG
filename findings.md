@@ -1,5 +1,12 @@
 # 发现与决策：TAGTAG 竞品调研
 
+## 2026-08-09 Windows 运行时与后续开发发现
+
+- Flutter Windows 使用 `--no-pub` 构建时会跳过平台插件注册文件刷新；依赖变化后必须先正常执行 `flutter pub get`，Release 产物还应显式检查原生插件 DLL。
+- Windows 进程可能同时拥有输入法/UAC 覆盖窗口和 Flutter 主窗口；自动化与单实例激活必须按 `FLUTTER_RUNNER_WIN32_WINDOW` 窗口类定位，不能依赖 `Process.MainWindowHandle`。
+- 阶段 9 的资源退出管理可继续使用已确认的 `ManagedLibrary` 公共测试 seam；现有导入日志与撤销只支持 `import_copy/import_move`，操作模型和 SQLite schema 需要版本化扩展。
+- schema v1 的 `operations.type` 使用只允许导入类型的 SQLite `CHECK` 约束；新增退出操作必须迁移并重建该表，不能只修改 Dart 枚举或把旧资料库直接标记为新版本。
+
 ## 用户需求
 - 对文件和文件夹采用统一的可标注对象模型。
 - 软件后台运行时支持全局快捷键打标签。

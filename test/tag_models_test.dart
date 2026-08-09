@@ -328,6 +328,123 @@ void main() {
     expect((await controller.listOperations()).single.undoneAt, isNotNull);
   });
 
+  test('restoring a resource exits it from the complete tag domain', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-domain-exit-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final source = File('${sandbox.path}/exit-domain.txt');
+    await source.writeAsString('exit domain');
+    final library = await ManagedLibrary.initialize(
+      Directory('${sandbox.path}/library'),
+    );
+    addTearDown(library.close);
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await store.save(AppState.demo());
+    final controller = TagTagController(store: store, library: library);
+    await controller.load();
+    final imported = await controller.importManagedResource(
+      source: source,
+      targetDirectory: '',
+      mode: ImportMode.move,
+      placementIds: const {'place-project'},
+    );
+    controller.toggleResourceSelection(imported.id, true);
+
+    await controller.restoreResourceToOriginalPath(imported.id);
+
+    expect(
+      controller.state.resources.any((resource) => resource.id == imported.id),
+      isFalse,
+    );
+    expect(
+      controller.state.memberships.any(
+        (membership) => membership.resourceId == imported.id,
+      ),
+      isFalse,
+    );
+    expect(
+      controller.state.assignments.any(
+        (assignment) => assignment.resourceId == imported.id,
+      ),
+      isFalse,
+    );
+    expect(
+      controller.state.usageEvents.any(
+        (event) => event.resourceId == imported.id,
+      ),
+      isFalse,
+    );
+    expect(controller.selectedResourceIds, isNot(contains(imported.id)));
+    expect(
+      (await controller.listOperations()).first.type,
+      ManagedOperationType.exitRestore,
+    );
+  });
+
+  test(
+    'undoing a restore exit restores its tag domain relationships',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-domain-undo-exit-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final source = File('${sandbox.path}/undo-domain-exit.txt');
+      await source.writeAsString('undo domain exit');
+      final library = await ManagedLibrary.initialize(
+        Directory('${sandbox.path}/library'),
+      );
+      addTearDown(library.close);
+      final store = LocalStore(
+        baseDirectory: Directory('${sandbox.path}/config'),
+      );
+      await store.save(AppState.demo());
+      final controller = TagTagController(store: store, library: library);
+      await controller.load();
+      final imported = await controller.importManagedResource(
+        source: source,
+        targetDirectory: 'managed',
+        mode: ImportMode.move,
+        placementIds: const {'place-project'},
+      );
+      final exitOperation = await controller.restoreResourceToOriginalPath(
+        imported.id,
+      );
+
+      await controller.undoOperation(exitOperation.id);
+
+      expect(
+        controller.state.resources
+            .singleWhere((resource) => resource.id == imported.id)
+            .path,
+        imported.path,
+      );
+      expect(
+        controller.state.memberships
+            .where((membership) => membership.resourceId == imported.id)
+            .map((membership) => membership.spaceId),
+        {'space-design'},
+      );
+      expect(
+        controller.state.assignments
+            .where((assignment) => assignment.resourceId == imported.id)
+            .map((assignment) => assignment.placementId),
+        {'place-project'},
+      );
+      expect(
+        controller.state.usageEvents.any(
+          (event) =>
+              event.resourceId == imported.id &&
+              event.placementId == 'place-project',
+        ),
+        isTrue,
+      );
+      expect(await source.exists(), isFalse);
+    },
+  );
+
   test('one managed resource can be a member of multiple tag spaces', () async {
     final directory = await Directory.systemTemp.createTemp(
       'tagtag-membership-',

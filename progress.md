@@ -1,5 +1,14 @@
 # 进度日志
 
+## 会话：2026-08-09（Windows 运行时修复与阶段 9 启动）
+
+- 修复 Windows Release 未注册 `file_selector_windows` 与 `desktop_drop` 的问题；正常执行插件生成并重新构建 Release。
+- 初始化页现在捕获目录选择器异常并显示错误；新增对应 Widget 回归测试。
+- Windows Runner 通过命名 Mutex 实现单实例，重复启动会恢复并激活已有窗口。
+- 新增 `tool/windows_release_smoke.ps1`，真实验证插件 DLL、存储根目录对话框和单实例恢复；GitHub Release 构建增加插件打包检查。
+- 验证结果：Flutter analyze 0 问题，26/26 测试通过，Windows Release 构建和三项真实 EXE 冒烟检查通过。
+- 阶段 9 开始：下一纵向切片为资源退出管理，先实现恢复原路径、冲突保护、日志与撤销，再扩展指定位置和 Windows 回收站。
+
 ## 会话：2026-08-09
 
 ### 阶段 7：现状审计与需求校对
@@ -207,3 +216,23 @@
 - 发布前最终结果：`flutter analyze --no-pub` 0 问题，`flutter test --no-pub` 25/25，Windows Release 构建成功，Release 主窗口 1280x720 视觉验证通过。
 - Git 基线已建立：功能提交 `717c124`，合并远程初始历史提交 `50e3014`；`origin/main` 是当前分支祖先。
 - 已非强制推送 `codex/managed-storage-core` 到 `git@github.com:yuesewuta/TAGTAG.git` 并建立上游跟踪。
+
+## 会话：2026-08-09（资源退出管理）
+
+- 继续阶段 9，首个纵向切片限定为“恢复到先前路径退出管理”。
+- 已在 `ManagedLibrary` seam 添加首个行为测试：成功恢复后资源离开存储根、受管记录删除，并写入 `exitRestore` 操作日志。
+- 首次运行单测被沙箱阻止写入 Flutter SDK `bin/cache/lockfile`；这是环境权限限制，需用受控权限重跑同一命令后再判断红灯原因。
+- 红灯确认缺少 `restoreToOriginalPath` 和 `ManagedOperationType.exitRestore`；已实现 schema v2、v1 操作表迁移和带文件补偿的恢复退出流程，单个行为测试通过。
+- 原路径同名冲突保护测试通过：冲突内容、受管内容、资源记录和操作日志均保持不变。
+- 添加撤销退出测试时首次补丁因 Dart 格式化后的多行测试声明与旧上下文不匹配而失败；没有产生部分修改，已按当前文件上下文重试。
+- 撤销 `exitRestore` 的红灯为“受管资源记录已不存在”；新增独立撤销分支后测试通过，资源恢复到原受管路径并保留资源 ID，外部恢复项被移除。
+- 检查持久化实现时误读不存在的 `lib/data/app_state_store.dart`；实际存储类位于 `lib/data/local_store.dart`，后续只使用实际路径。
+- 首次编译控制器退出测试时遗漏 `toggleResourceSelection` 的布尔参数；已按公开接口补为 `true` 后重跑，不把测试代码错误当作产品红灯。
+- 控制器退出管理测试先因缺少公开命令变红；实现 `restoreResourceToOriginalPath` 并让资源同步同时清理资源使用记录后变绿，标签、空间成员、选择和资源历史均不再留下悬空引用。
+- 撤销退出关系测试按预期因直接标签缺失变红；操作日志新增 `context_json` 元数据快照后变绿，应用重启后仍具备恢复标签、空间成员和资源使用记录所需的信息。
+- 插入文件夹与 v1 迁移回归测试时再次使用了被 formatter 改写的长测试声明作补丁锚点，匹配失败且无部分修改；已改用稳定的下一测试标题作为锚点。
+- 检查器已接入单资源“恢复先前路径并退出管理”确认命令；操作日志用完整类型分支区分复制导入、移动导入和恢复原路径退出。
+- `ManagedLibrary` 测试 15/15 通过，新增覆盖文件夹完整层级的退出/撤销与 schema v1→v2 迁移。
+- 全套 Flutter 测试 33/33 通过；Windows Release 构建成功，插件打包、目录选择器和单实例恢复冒烟检查全部通过。
+- 首次用 `CopyFromScreen` 捕获 Release 窗口时，前台游戏阻止 `SetForegroundWindow`，截图实际是被遮挡的桌面内容，不能用于布局结论；改用按 TAGTAG 窗口句柄执行 `PrintWindow`。
+- `PrintWindow` 捕获的 1280×720 主窗口及选中资源检查器验证通过；“恢复先前路径并退出管理”按钮完整可见，无文字截断、布局重叠或动态位移。

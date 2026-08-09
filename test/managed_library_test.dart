@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as path;
+import 'package:sqlite3/sqlite3.dart';
 import 'package:tagtag/storage/library_locator.dart';
 import 'package:tagtag/storage/managed_library.dart';
 
@@ -183,6 +184,223 @@ void main() {
     expect(await File('${root.path}/managed/restore-me.txt').exists(), isFalse);
     expect(await library.listResources(), isEmpty);
     expect((await library.listOperations()).single.undoneAt, isNotNull);
+  });
+
+  test(
+    'restoring a managed resource to its original path exits management',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-exit-restore-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/restore-after-exit.txt');
+      await source.writeAsString('restore after exit');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final imported = await library.importResource(
+        source: source,
+        targetDirectory: 'managed',
+        mode: ImportMode.move,
+      );
+
+      final operation = await library.restoreToOriginalPath(imported.id);
+
+      expect(await source.readAsString(), 'restore after exit');
+      expect(
+        await File('${root.path}/managed/restore-after-exit.txt').exists(),
+        isFalse,
+      );
+      expect(await library.listResources(), isEmpty);
+      expect(operation.type, ManagedOperationType.exitRestore);
+      expect(operation.resourceId, imported.id);
+      expect(operation.sourcePath, path.normalize(source.absolute.path));
+      expect(operation.destinationRelativePath, imported.relativePath);
+      expect(operation.undoneAt, isNull);
+    },
+  );
+
+  test(
+    'restore exit never overwrites a conflict at the original path',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-exit-conflict-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/conflict.txt');
+      await source.writeAsString('managed version');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final imported = await library.importResource(
+        source: source,
+        targetDirectory: '',
+        mode: ImportMode.move,
+      );
+      await source.writeAsString('conflicting version');
+
+      await expectLater(
+        library.restoreToOriginalPath(imported.id),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(await source.readAsString(), 'conflicting version');
+      expect(
+        await File('${root.path}/conflict.txt').readAsString(),
+        'managed version',
+      );
+      expect((await library.listResources()).single.id, imported.id);
+      expect(
+        (await library.listOperations()).where(
+          (operation) => operation.type == ManagedOperationType.exitRestore,
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'undoing a restore exit returns the resource to its managed path',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-undo-exit-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = File('${sandbox.path}/undo-exit.txt');
+      await source.writeAsString('undo exit');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final imported = await library.importResource(
+        source: source,
+        targetDirectory: 'managed',
+        mode: ImportMode.move,
+      );
+      final exitOperation = await library.restoreToOriginalPath(imported.id);
+
+      await library.undo(exitOperation.id);
+
+      expect(await source.exists(), isFalse);
+      expect(
+        await File('${root.path}/managed/undo-exit.txt').readAsString(),
+        'undo exit',
+      );
+      final restored = (await library.listResources()).single;
+      expect(restored.id, imported.id);
+      expect(restored.relativePath, imported.relativePath);
+      expect(restored.originalPath, imported.originalPath);
+      expect(
+        (await library.listOperations())
+            .singleWhere((operation) => operation.id == exitOperation.id)
+            .undoneAt,
+        isNotNull,
+      );
+    },
+  );
+
+  test(
+    'folder restore exit and undo preserve the complete hierarchy',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-folder-exit-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final source = Directory('${sandbox.path}/folder-to-restore');
+      await Directory('${source.path}/nested').create(recursive: true);
+      await File('${source.path}/nested/note.txt').writeAsString('folder exit');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final imported = await library.importResource(
+        source: source,
+        targetDirectory: 'managed',
+        mode: ImportMode.move,
+      );
+
+      final exitOperation = await library.restoreToOriginalPath(imported.id);
+
+      expect(
+        await File('${source.path}/nested/note.txt').readAsString(),
+        'folder exit',
+      );
+      expect(
+        await Directory('${root.path}/managed/folder-to-restore').exists(),
+        isFalse,
+      );
+
+      await library.undo(exitOperation.id);
+
+      expect(await source.exists(), isFalse);
+      expect(
+        await File(
+          '${root.path}/managed/folder-to-restore/nested/note.txt',
+        ).readAsString(),
+        'folder exit',
+      );
+    },
+  );
+
+  test('opening a schema v1 library migrates its operation history', () async {
+    final sandbox = await Directory.systemTemp.createTemp('tagtag-schema-v1-');
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final source = File('${sandbox.path}/schema-v1.txt');
+    await source.writeAsString('schema v1');
+    final library = await ManagedLibrary.initialize(root);
+    final imported = await library.importResource(
+      source: source,
+      targetDirectory: '',
+      mode: ImportMode.move,
+    );
+    await library.close();
+
+    final database = sqlite3.open('${root.path}/.tagtag/tagtag.sqlite');
+    database.execute('BEGIN IMMEDIATE');
+    try {
+      database.execute('ALTER TABLE operations RENAME TO operations_v2');
+      database.execute('''
+        CREATE TABLE operations (
+          id TEXT PRIMARY KEY,
+          type TEXT NOT NULL CHECK (type IN ('import_copy', 'import_move')),
+          resource_id TEXT NOT NULL,
+          source_path TEXT NOT NULL,
+          destination_relative_path TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          undone_at TEXT
+        )
+      ''');
+      database.execute('''
+        INSERT INTO operations(
+          id, type, resource_id, source_path,
+          destination_relative_path, created_at, undone_at
+        )
+        SELECT id, type, resource_id, source_path,
+               destination_relative_path, created_at, undone_at
+        FROM operations_v2
+      ''');
+      database.execute('DROP TABLE operations_v2');
+      database.execute(
+        "UPDATE metadata SET value = '1' WHERE key = 'schema_version'",
+      );
+      database.execute('COMMIT');
+    } catch (_) {
+      database.execute('ROLLBACK');
+      rethrow;
+    } finally {
+      database.close();
+    }
+
+    final migrated = await ManagedLibrary.open(root);
+    addTearDown(migrated.close);
+    expect(
+      (await migrated.listOperations()).single.type,
+      ManagedOperationType.importMove,
+    );
+
+    final exitOperation = await migrated.restoreToOriginalPath(imported.id);
+
+    expect(exitOperation.type, ManagedOperationType.exitRestore);
+    expect(await source.readAsString(), 'schema v1');
   });
 
   test(

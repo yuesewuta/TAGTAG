@@ -12,7 +12,7 @@ enum ManagedResourceKind { file, folder }
 
 enum ManagedResourceStatus { managed, missing }
 
-enum ManagedOperationType { importCopy, importMove }
+enum ManagedOperationType { importCopy, importMove, exitRestore }
 
 enum ConsistencyFindingType { untracked, missing }
 
@@ -49,6 +49,7 @@ class ManagedOperation {
     required this.destinationRelativePath,
     required this.createdAt,
     required this.undoneAt,
+    this.contextJson,
   });
 
   final String id;
@@ -58,6 +59,7 @@ class ManagedOperation {
   final String destinationRelativePath;
   final DateTime createdAt;
   final DateTime? undoneAt;
+  final String? contextJson;
 }
 
 class ConsistencyFinding {
@@ -81,7 +83,7 @@ class ManagedLibrary {
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
-  static const _schemaVersion = 1;
+  static const _schemaVersion = 2;
 
   final Directory root;
   final Database _database;
@@ -100,18 +102,7 @@ class ManagedLibrary {
     );
     try {
       _configure(database);
-      database.execute('BEGIN IMMEDIATE');
-      try {
-        _createSchema(database);
-        database.execute(
-          'INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)',
-          ['schema_version', '$_schemaVersion'],
-        );
-        database.execute('COMMIT');
-      } catch (_) {
-        database.execute('ROLLBACK');
-        rethrow;
-      }
+      _prepareSchema(database);
       return ManagedLibrary._(root: normalizedRoot, database: database);
     } catch (_) {
       database.close();
@@ -130,13 +121,7 @@ class ManagedLibrary {
     final database = sqlite3.open(databaseFile.path);
     try {
       _configure(database);
-      final version = database.select(
-        "SELECT value FROM metadata WHERE key = 'schema_version'",
-      );
-      if (version.length != 1 ||
-          int.tryParse(version.single['value'] as String) != _schemaVersion) {
-        throw const FormatException('不支持的 TAGTAG 元数据版本');
-      }
+      _prepareSchema(database);
       return ManagedLibrary._(root: normalizedRoot, database: database);
     } catch (_) {
       database.close();
@@ -279,7 +264,7 @@ class ManagedLibrary {
   Future<List<ManagedOperation>> listOperations() async {
     final rows = _database.select('''
       SELECT id, type, resource_id, source_path,
-             destination_relative_path, created_at, undone_at
+             destination_relative_path, created_at, undone_at, context_json
       FROM operations
       ORDER BY created_at DESC
     ''');
@@ -290,6 +275,7 @@ class ManagedLibrary {
             type: switch (row['type'] as String) {
               'import_copy' => ManagedOperationType.importCopy,
               'import_move' => ManagedOperationType.importMove,
+              'exit_restore' => ManagedOperationType.exitRestore,
               final value => throw FormatException('未知操作类型: $value'),
             },
             resourceId: row['resource_id'] as String,
@@ -299,9 +285,92 @@ class ManagedLibrary {
             undoneAt: row['undone_at'] == null
                 ? null
                 : DateTime.parse(row['undone_at'] as String),
+            contextJson: row['context_json'] as String?,
           ),
         )
         .toList();
+  }
+
+  Future<ManagedOperation> restoreToOriginalPath(
+    String resourceId, {
+    String? contextJson,
+  }) async {
+    final matches = (await listResources()).where(
+      (resource) => resource.id == resourceId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(resourceId, 'resourceId', '找不到受管资源');
+    }
+    final resource = matches.single;
+    final originalPath = resource.originalPath;
+    if (originalPath == null || originalPath.isEmpty) {
+      throw StateError('该资源没有可恢复的先前路径');
+    }
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final managedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(managedPath) != type) {
+      throw FileSystemException('受管资源已缺失，无法恢复到先前路径', managedPath);
+    }
+    if (await FileSystemEntity.type(originalPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('先前路径已存在同名资源，TAGTAG 不会覆盖', originalPath);
+    }
+
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.exitRestore,
+      resourceId: resource.id,
+      sourcePath: originalPath,
+      destinationRelativePath: resource.relativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+      contextJson: contextJson,
+    );
+    await Directory(path.dirname(originalPath)).create(recursive: true);
+    await _copyEntity(managedPath, originalPath, type);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at, context_json
+          ) VALUES (?, 'exit_restore', ?, ?, ?, ?, NULL, ?)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+          operation.contextJson,
+        ],
+      );
+      _database.execute('DELETE FROM resources WHERE id = ?', [resource.id]);
+      await _deleteEntity(managedPath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(managedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(originalPath) == type) {
+        await Directory(path.dirname(managedPath)).create(recursive: true);
+        await _copyEntity(originalPath, managedPath, type);
+      }
+      if (await FileSystemEntity.type(originalPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(originalPath, type);
+      }
+      rethrow;
+    }
   }
 
   Future<List<ConsistencyFinding>> scanConsistency() async {
@@ -416,6 +485,10 @@ class ManagedLibrary {
     if (operation.undoneAt != null) {
       throw StateError('该操作已经撤销');
     }
+    if (operation.type == ManagedOperationType.exitRestore) {
+      await _undoRestoreExit(operation);
+      return;
+    }
     if (operation.type == ManagedOperationType.importMove &&
         await FileSystemEntity.type(operation.sourcePath) !=
             FileSystemEntityType.notFound) {
@@ -479,6 +552,73 @@ class ManagedLibrary {
           FileSystemEntityType.notFound) {
         await Directory(path.dirname(destinationPath)).create(recursive: true);
         await _renameEntity(stagingPath, destinationPath, type);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _undoRestoreExit(ManagedOperation operation) async {
+    final type = await FileSystemEntity.type(
+      operation.sourcePath,
+      followLinks: false,
+    );
+    if (type != FileSystemEntityType.file &&
+        type != FileSystemEntityType.directory) {
+      throw FileSystemException('恢复位置的资源已缺失，无法撤销退出管理', operation.sourcePath);
+    }
+    final managedPath = _absolutePath(operation.destinationRelativePath);
+    if (await FileSystemEntity.type(managedPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原受管路径已存在同名资源，TAGTAG 不会覆盖', managedPath);
+    }
+
+    await Directory(path.dirname(managedPath)).create(recursive: true);
+    await _copyEntity(operation.sourcePath, managedPath, type);
+    var transactionActive = false;
+    try {
+      final stat = await FileStat.stat(managedPath);
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO resources(
+            id, name, relative_path, kind, status, original_path,
+            size_bytes, modified_at, created_at
+          ) VALUES (?, ?, ?, ?, 'managed', ?, ?, ?, ?)
+        ''',
+        [
+          operation.resourceId,
+          path.posix.basename(operation.destinationRelativePath),
+          operation.destinationRelativePath,
+          type == FileSystemEntityType.file ? 'file' : 'folder',
+          operation.sourcePath,
+          type == FileSystemEntityType.file ? stat.size : null,
+          stat.modified.toUtc().toIso8601String(),
+          operation.createdAt.toIso8601String(),
+        ],
+      );
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      await _deleteEntity(operation.sourcePath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(operation.sourcePath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(managedPath) == type) {
+        await Directory(
+          path.dirname(operation.sourcePath),
+        ).create(recursive: true);
+        await _copyEntity(managedPath, operation.sourcePath, type);
+      }
+      if (await FileSystemEntity.type(managedPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(managedPath, type);
       }
       rethrow;
     }
@@ -665,6 +805,57 @@ class ManagedLibrary {
     database.execute('PRAGMA journal_mode = WAL');
   }
 
+  static void _prepareSchema(Database database) {
+    database.execute('BEGIN IMMEDIATE');
+    try {
+      database.execute('''
+        CREATE TABLE IF NOT EXISTS metadata (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        )
+      ''');
+      final versionRows = database.select(
+        "SELECT value FROM metadata WHERE key = 'schema_version'",
+      );
+      final version = versionRows.isEmpty
+          ? null
+          : int.tryParse(versionRows.single['value'] as String);
+      switch (version) {
+        case null:
+          _createSchema(database);
+        case 1:
+          _migrateV1ToV2(database);
+        case _schemaVersion:
+          _createSchema(database);
+        default:
+          throw const FormatException('不支持的 TAGTAG 元数据版本');
+      }
+      database.execute(
+        'INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)',
+        ['schema_version', '$_schemaVersion'],
+      );
+      database.execute('COMMIT');
+    } catch (_) {
+      database.execute('ROLLBACK');
+      rethrow;
+    }
+  }
+
+  static void _migrateV1ToV2(Database database) {
+    database.execute('ALTER TABLE operations RENAME TO operations_v1');
+    _createOperationsTable(database);
+    database.execute('''
+      INSERT INTO operations(
+        id, type, resource_id, source_path,
+        destination_relative_path, created_at, undone_at
+      )
+      SELECT id, type, resource_id, source_path,
+             destination_relative_path, created_at, undone_at
+      FROM operations_v1
+    ''');
+    database.execute('DROP TABLE operations_v1');
+  }
+
   static void _createSchema(Database database) {
     database.execute('''
       CREATE TABLE IF NOT EXISTS metadata (
@@ -685,17 +876,7 @@ class ManagedLibrary {
         created_at TEXT NOT NULL
       )
     ''');
-    database.execute('''
-      CREATE TABLE IF NOT EXISTS operations (
-        id TEXT PRIMARY KEY,
-        type TEXT NOT NULL CHECK (type IN ('import_copy', 'import_move')),
-        resource_id TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        destination_relative_path TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        undone_at TEXT
-      )
-    ''');
+    _createOperationsTable(database);
     database.execute('''
       CREATE TABLE IF NOT EXISTS consistency_findings (
         id TEXT PRIMARY KEY,
@@ -703,6 +884,23 @@ class ManagedLibrary {
         relative_path TEXT NOT NULL,
         resource_id TEXT,
         detected_at TEXT NOT NULL
+      )
+    ''');
+  }
+
+  static void _createOperationsTable(Database database) {
+    database.execute('''
+      CREATE TABLE IF NOT EXISTS operations (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL CHECK (
+          type IN ('import_copy', 'import_move', 'exit_restore')
+        ),
+        resource_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        destination_relative_path TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        undone_at TEXT,
+        context_json TEXT
       )
     ''');
   }
