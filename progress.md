@@ -370,3 +370,5 @@
 - UI 修复后的首次静态分析只报告测试辅助函数使用已弃用的 `Finder.description`；改为固定超时说明后重跑。
 - 最终本地验证：Dart 格式检查 14 个文件零改动，`flutter analyze --no-pub` 零问题，全量测试 61/61 通过，Windows Release 构建成功，必需插件 DLL 打包检查为 GREEN。
 - 阶段 15 的便携 ZIP、Inno Setup 安装器和 GitHub Release 双资产配置已完成；安装/升级/卸载的真实执行仍等待 GitHub Windows runner，阶段保持进行中且不创建发布标签。
+- 提交 `daab472` 已推送到 `origin/codex/managed-storage-core`；推送前 fetch 确认远程分支与本地基线一致。
+- 已通过登录状态的 GitHub Actions 页面尝试手动触发，但默认分支 `main` 仍只有初始提交，页面尚不识别功能分支中的 workflow。当前分支领先 `main` 11 个提交；未擅自合并默认分支或创建 `v*` 发布标签。
