@@ -189,9 +189,10 @@ void main() {
       ),
       (_) {},
     );
-    await tester.pumpAndSettle();
 
-    expect(find.text('导入并标注 1 个资源'), findsOneWidget);
+    final importDialog = find.text('导入并标注 1 个资源');
+    await _pumpUntilFound(tester, importDialog);
+    expect(importDialog, findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
