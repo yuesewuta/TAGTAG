@@ -12,6 +12,7 @@ void main() {
       'windows/entrypoints/tagtag_explorer_bridge.cpp',
     ).readAsString();
     final runner = await File('windows/runner/flutter_window.cpp').readAsString();
+    final runnerCmake = await File('windows/runner/CMakeLists.txt').readAsString();
     final installer = await File('installer/tagtag.iss').readAsString();
 
     expect(protocol, contains('kExplorerPathsCopyDataId'));
@@ -23,6 +24,10 @@ void main() {
     expect(runner, contains('message == WM_COPYDATA'));
     expect(runner, contains('ActivateExternalQuickTag'));
     expect(runner, contains('"externalPaths"'));
+    expect(
+      runnerCmake,
+      contains(r'add_dependencies(${BINARY_NAME} tagtag_explorer_bridge)'),
+    );
     expect(installer, contains('tagtag_explorer_bridge.exe'));
     expect(installer, contains('MultiSelectModel'));
     expect(installer, contains('uninsdeletekey'));

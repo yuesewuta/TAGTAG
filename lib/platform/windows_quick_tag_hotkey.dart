@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 typedef QuickTagActivationHandler = Future<void> Function(
@@ -36,7 +38,8 @@ class WindowsQuickTagHotkey {
       return;
     }
     if (call.method == 'activated') {
-      await onActivated(const []);
+      // A native one-way activation must be acknowledged before its UI flow ends.
+      unawaited(onActivated(const []));
       return;
     }
     if (call.method == 'externalPaths') {
@@ -47,7 +50,7 @@ class WindowsQuickTagHotkey {
           message: 'Quick Tag external paths must be a string list.',
         );
       }
-      await onActivated(arguments.cast<String>());
+      unawaited(onActivated(arguments.cast<String>()));
       return;
     }
     throw MissingPluginException('Unsupported Quick Tag event: ${call.method}');

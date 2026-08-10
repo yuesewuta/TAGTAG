@@ -10,7 +10,7 @@ void main() {
     expect(source, contains('Shell_NotifyIconW(NIM_ADD'));
     expect(source, contains('Shell_NotifyIconW(NIM_DELETE'));
     expect(source, contains('NOTIFYICON_VERSION_4'));
-    expect(source, contains('case WM_CLOSE'));
+    expect(source, contains('if (message == WM_CLOSE)'));
     expect(source, contains('ShowWindow(hwnd, SW_HIDE)'));
     expect(source, contains('kTrayCommandShow'));
     expect(source, contains('kTrayCommandQuickTag'));
