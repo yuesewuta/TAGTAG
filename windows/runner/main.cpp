@@ -3,19 +3,19 @@
 #include <windows.h>
 
 #include "flutter_window.h"
+#include "tagtag_entrypoint_protocol.h"
 #include "utils.h"
 
 namespace {
 
 constexpr wchar_t kSingleInstanceMutexName[] =
     L"Local\\TAGTAG-82F13D35-24D8-4B89-B8A8-E44EF4C40A8E";
-constexpr wchar_t kMainWindowClassName[] = L"FLUTTER_RUNNER_WIN32_WINDOW";
-constexpr wchar_t kMainWindowTitle[] = L"tagtag";
 
-void ActivateExistingWindow() {
+void ActivateExistingWindow(const std::vector<std::wstring>& quick_tag_paths) {
   HWND existing_window = nullptr;
   for (int attempt = 0; attempt < 40 && existing_window == nullptr; ++attempt) {
-    existing_window = ::FindWindow(kMainWindowClassName, kMainWindowTitle);
+    existing_window = ::FindWindow(tagtag::kMainWindowClassName,
+                                   tagtag::kMainWindowTitle);
     if (existing_window == nullptr) {
       ::Sleep(50);
     }
@@ -29,6 +29,9 @@ void ActivateExistingWindow() {
   ::SetWindowPos(existing_window, HWND_TOP, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
   ::SetForegroundWindow(existing_window);
+  if (!quick_tag_paths.empty()) {
+    tagtag::SendExplorerPaths(existing_window, quick_tag_paths);
+  }
 }
 
 }  // namespace
@@ -47,7 +50,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     return EXIT_FAILURE;
   }
   if (::GetLastError() == ERROR_ALREADY_EXISTS) {
-    ActivateExistingWindow();
+    ActivateExistingWindow(tagtag::QuickTagPathsFromCommandLine());
     ::CloseHandle(single_instance_mutex);
     return EXIT_SUCCESS;
   }

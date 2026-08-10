@@ -1,5 +1,22 @@
 # 进度日志
 
+## 会话：2026-08-10（SQLite 标签元数据统一）
+
+- 用户要求继续开发。按本地 issue tracker 与领域文档复核后，阶段 9 尚余两项：标签状态从应用数据 JSON 迁入资料库 SQLite，以及里程碑 2 的系统入口。
+- 本轮先处理 SQLite 元数据统一：它收敛受管资源、标签、空间和操作日志的持久化边界，但不存储资源文件字节，也不改变存储根中的普通文件和文件夹。
+- 已恢复规划上下文；上一轮 `v0.1.0` 标签发布和双 Windows 产物已记录在版本库，当前 `main` 工作区干净。
+- 已建立 `.scratch/metadata-persistence/` 本地任务，并按测试 seam 先验证 SQLite 文档重开、旧状态一次迁移和 SQLite 权威性；初始红灯为缺少 `ManagedLibrary` 标签元数据接口。
+- 实现 schema v6 的成对标签状态/偏好文档事务，控制器在 SQLite 文档不存在时才校验并导入旧 JSON，之后所有状态、偏好和资源同步均写入资料库。全局恢复协调器不再读取或回写旧状态作为回滚来源。
+- 首次恢复协调器调整误删了构造恢复后控制器所需的 `LocalStore` 注入，定向测试在编译期准确报错；恢复该依赖但不恢复旧 JSON 读写后，定向标签领域测试 25/25 通过。
+- 全量测试第一次运行发现主应用恢复调用写成不存在的 `widget.loc`；改为 `widget.locator` 后，完整套件 64/64 通过，`flutter analyze --no-pub` 0 问题，Windows Release 构建与插件打包冒烟均为 GREEN。
+- 阶段 9 的 SQLite 标签元数据统一已完成；本地任务 `.scratch/metadata-persistence/` 已解决，下一项进入里程碑 2 的 Windows 系统入口。
+- 里程碑 2 已创建 `.scratch/windows-system-entrypoints/`，首个 `Ctrl+Shift+T` 全局 Quick Tag 切片在 Windows runner 以 `RegisterHotKey` 注册，激活时恢复窗口并向 Flutter 发送事件；C++ 不承担资源或标签业务。
+- Flutter 通道适配器查询原生注册状态、转发激活事件并在页面销毁时取消监听。已选受管资源复用既有标签对话框；没有选择时打开原有文件选择，后续仍进入统一导入并标注流程。
+- 通道测试先因适配器文件缺失转红；首次实现又因当前 Flutter 的 `setMethodCallHandler` 为同步 API 报错，移除多余 `await` 后通过。主页测试夹具随后修正了 `tester.runAsync` 的可空返回值；通道和主页定向测试均通过，Windows Release 已成功编译链接全局热键桥接。
+- 随后在原工作区完成完整 Flutter 测试、`flutter analyze --no-pub`、Windows Release 构建和插件打包冒烟；此前 SQLite 原生资产文件锁已解除。全局 Quick Tag 任务已关闭，下一张任务卡为 Win32 托盘常驻生命周期。
+- 托盘常驻生命周期随后以 Win32 `Shell_NotifyIconW` 实现：普通关闭隐藏窗口，菜单提供显示、Quick Tag 和明确退出。热键注册句柄被显式保留，避免基类在 `WM_DESTROY` 后清空窗口句柄导致注销失败。新增原生生命周期回归测试；完整测试、静态检查、Windows Release 构建和插件冒烟均通过。Explorer 右键桥接为下一项。
+- Explorer 右键采用独立 `tagtag_explorer_bridge.exe`：它只转发选中路径或启动既有应用，不加载 Flutter、SQLite 或领域逻辑；安装器按当前用户注册文件和文件夹命令。已有受管路径进入标签选择，外部路径进入导入并标注对话框。可选悬浮接收目标以置顶 Win32 小窗口实现，设置随资料库元数据持久化，拖放同样复用该路径事件。至此里程碑 2 的四个系统入口全部完成。完整 Flutter 测试、静态检查、Windows Release 与产物检查均通过；本机未安装 Inno Setup，安装器编译由 GitHub Actions 的既有步骤验证。
+
 ## 会话：2026-08-09（阶段 13：一致性告警处理）
 
 - 用户要求继续后续开发；Git 分支 `codex/managed-storage-core` 与远端同步，HEAD `f728aae`，工作区干净。

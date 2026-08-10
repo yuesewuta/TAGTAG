@@ -4,25 +4,40 @@ import 'dart:io';
 import '../models/tag_models.dart';
 
 class UserPreferences {
-  const UserPreferences({this.moveImportsByDefault = false});
+  const UserPreferences({
+    this.moveImportsByDefault = false,
+    this.floatingDropTargetEnabled = false,
+  });
 
   final bool moveImportsByDefault;
+  final bool floatingDropTargetEnabled;
 
-  UserPreferences copyWith({bool? moveImportsByDefault}) => UserPreferences(
+  UserPreferences copyWith({
+    bool? moveImportsByDefault,
+    bool? floatingDropTargetEnabled,
+  }) => UserPreferences(
     moveImportsByDefault: moveImportsByDefault ?? this.moveImportsByDefault,
+    floatingDropTargetEnabled:
+        floatingDropTargetEnabled ?? this.floatingDropTargetEnabled,
   );
 
   Map<String, dynamic> toJson() => {
     'version': 1,
     'moveImportsByDefault': moveImportsByDefault,
+    'floatingDropTargetEnabled': floatingDropTargetEnabled,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
-    if (json['version'] != 1 || json['moveImportsByDefault'] is! bool) {
+    final floatingDropTargetEnabled = json['floatingDropTargetEnabled'];
+    if (json['version'] != 1 ||
+        json['moveImportsByDefault'] is! bool ||
+        (floatingDropTargetEnabled != null &&
+            floatingDropTargetEnabled is! bool)) {
       throw const FormatException('TAGTAG 设置文件无效');
     }
     return UserPreferences(
       moveImportsByDefault: json['moveImportsByDefault'] as bool,
+      floatingDropTargetEnabled: floatingDropTargetEnabled as bool? ?? false,
     );
   }
 }

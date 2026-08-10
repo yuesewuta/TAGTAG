@@ -1,5 +1,26 @@
 # 发现与决策：TAGTAG 竞品调研
 
+## 2026-08-10 Windows 系统入口完成
+
+- `Ctrl+Shift+T`、托盘、Explorer 右键和可选悬浮接收目标均已通过现有 Flutter 导入/标注流程工作；原生代码只负责窗口、路径或激活事件，不处理标签、资源文件和 SQLite。
+- Explorer 命令使用独立桥接进程与结构化 `WM_COPYDATA` 路径载荷，安装器以当前用户注册并在卸载时删除对应键，避免在 Explorer 进程内加载 Flutter。
+- 悬浮接收目标默认关闭，配置属于资料库 SQLite 中的标签域元数据；它在主窗口隐藏到托盘后仍可接收文件和文件夹拖放。
+
+## 2026-08-10 SQLite 标签元数据统一
+
+- 当前受管资源、操作日志和一致性告警已在每个存储根的 `.tagtag/tagtag.sqlite`；标签空间、标签实体、标签位置、标注、空间成员、使用事件和导入偏好仍由应用数据目录的 `state.json` 与 `preferences.json` 保存。
+- 直接将现有 `AppState` 图谱拆成多张关系表会同时改变模型、查询和迁移行为；当前需求的关键是让资料库成为权威持久化边界。因此首轮迁移选择 SQLite `metadata` 表中的版本化 JSON 文档，不存资源文件字节，并保留后续规范化表迁移空间。
+- 迁移必须以“SQLite 中是否已有完整文档”为唯一权威信号。首次只从能通过现有 `AppState` / `UserPreferences` 解析的旧 JSON 导入；成功后后续启动不读取旧副本，防止旧应用数据覆盖资料库的新状态。
+- 控制器当前在每次标签域更新和资源同步后都调用 `LocalStore.save`；迁移必须同时改写 `load`、`_update`、偏好更新、资源同步和全局恢复持久化，否则重启时仍会读到旧 JSON 或在资源同步后回写到旧位置。
+- 实现采用 schema v6：两个 JSON 文档在同一 SQLite 事务内写入。资料库重开、首次迁移、旧 JSON 被篡改后的权威性以及损坏旧 JSON 不写入半份文档均由回归测试覆盖。
+
+## 2026-08-10 Windows 系统入口
+
+- 现有 `Ctrl+Shift+T` 是 Flutter `CallbackShortcuts`，仅在 TAGTAG 主窗口获得键盘焦点时调用已选资源的 Quick Tag 对话框，不能满足后台全局快捷键。
+- Windows runner 已有可复用的 `FlutterWindow::MessageHandler` 和 MethodChannel 模式；全局快捷键只需在该层注册、激活窗口并发送事件。标签、导入、文件选择和 SQLite 仍由 Flutter 已有工作流处理。
+- 由于系统热键本身不提供 Explorer 当前选择，首个切片在没有受管资源选中时打开常规文件选择，再复用统一导入并标注对话框；Explorer 右键会在后续独立桥接中传递实际选中路径。
+- Windows runner 在 `OnCreate` 注册热键并创建状态/事件通道，在 `WM_HOTKEY` 中恢复、前置主窗口后通知 Flutter，在 `OnDestroy` 注销热键。该生命周期不引入后台常驻；关闭窗口后的托盘继续由下一张任务实现。
+
 ## 2026-08-09 全局备份恢复与发布
 
 - 当前完整备份创建包含 SQLite 快照、标签状态、资源层级和 v1 manifest，但 manifest 没有文件哈希，也没有灾难恢复入口。

@@ -1,11 +1,13 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tagtag/data/local_store.dart';
 import 'package:tagtag/main.dart';
 import 'package:tagtag/models/tag_models.dart';
 import 'package:tagtag/platform/windows_file_actions.dart';
+import 'package:tagtag/platform/windows_quick_tag_hotkey.dart';
 import 'package:tagtag/state/tagtag_controller.dart';
 import 'package:tagtag/storage/library_locator.dart';
 import 'package:tagtag/storage/managed_library.dart';
@@ -95,6 +97,102 @@ void main() {
     expect(find.text('恢复记录路径'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'native Quick Tag activation reuses the selected-resource dialog',
+    (tester) async {
+      const channel = MethodChannel('tagtag/windows_quick_tag');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'isRegistered');
+        return true;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final sandbox = (await tester.runAsync(
+        () => Directory.systemTemp.createTemp('tagtag-global-quick-tag-'),
+      ))!;
+      addTearDown(() => sandbox.delete(recursive: true));
+      final store = LocalStore(
+        baseDirectory: Directory('${sandbox.path}/config'),
+      );
+      await tester.runAsync(() => store.save(AppState.demo()));
+      final controller = TagTagController(store: store);
+      await tester.runAsync(controller.load);
+      controller.selectResource('resource-architecture');
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: TagTagHome(
+            controller: controller,
+            fileActions: WindowsFileActions(),
+            quickTagHotkey: WindowsQuickTagHotkey(channel: channel),
+            onRestoreGlobalBackup: (_, _) async {},
+          ),
+        ),
+      );
+      await tester.pump();
+      await messenger.handlePlatformMessage(
+        channel.name,
+        channel.codec.encodeMethodCall(const MethodCall('activated')),
+        (_) {},
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('为 1 项添加标签'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('Explorer Quick Tag activation opens the import-and-tag dialog', (
+    tester,
+  ) async {
+    const channel = MethodChannel('tagtag/windows_quick_tag');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'isRegistered');
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('tagtag-explorer-quick-tag-'),
+    ))!;
+    addTearDown(() => sandbox.delete(recursive: true));
+    final source = File('${sandbox.path}/外部资源.txt');
+    await tester.runAsync(() => source.writeAsString('external resource'));
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await tester.runAsync(() => store.save(AppState.demo()));
+    final controller = TagTagController(store: store);
+    await tester.runAsync(controller.load);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TagTagHome(
+          controller: controller,
+          fileActions: WindowsFileActions(),
+          quickTagHotkey: WindowsQuickTagHotkey(channel: channel),
+          onRestoreGlobalBackup: (_, _) async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await messenger.handlePlatformMessage(
+      channel.name,
+      channel.codec.encodeMethodCall(
+        MethodCall('externalPaths', [source.path]),
+      ),
+      (_) {},
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('导入并标注 1 个资源'), findsOneWidget);
+    expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

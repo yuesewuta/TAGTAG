@@ -125,12 +125,24 @@ class BackupRestoreResult {
   final String? preferencesJson;
 }
 
+class TagDomainMetadata {
+  const TagDomainMetadata({
+    required this.tagStateJson,
+    required this.preferencesJson,
+  });
+
+  final String tagStateJson;
+  final String preferencesJson;
+}
+
 class ManagedLibrary {
   ManagedLibrary._({required this.root, required this._database});
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
-  static const _schemaVersion = 5;
+  static const _schemaVersion = 6;
+  static const _tagStateMetadataKey = 'tag_state_json';
+  static const _preferencesMetadataKey = 'preferences_json';
 
   final Directory root;
   final Database _database;
@@ -172,6 +184,49 @@ class ManagedLibrary {
       return ManagedLibrary._(root: normalizedRoot, database: database);
     } catch (_) {
       database.close();
+      rethrow;
+    }
+  }
+
+  Future<TagDomainMetadata?> readTagDomainMetadata() async {
+    final rows = _database.select(
+      'SELECT key, value FROM metadata WHERE key IN (?, ?)',
+      [_tagStateMetadataKey, _preferencesMetadataKey],
+    );
+    if (rows.isEmpty) {
+      return null;
+    }
+    final values = <String, String>{
+      for (final row in rows) row['key'] as String: row['value'] as String,
+    };
+    final tagStateJson = values[_tagStateMetadataKey];
+    final preferencesJson = values[_preferencesMetadataKey];
+    if (tagStateJson == null || preferencesJson == null) {
+      throw const FormatException('TAGTAG 标签元数据不完整');
+    }
+    return TagDomainMetadata(
+      tagStateJson: tagStateJson,
+      preferencesJson: preferencesJson,
+    );
+  }
+
+  Future<void> writeTagDomainMetadata({
+    required String tagStateJson,
+    required String preferencesJson,
+  }) async {
+    _database.execute('BEGIN IMMEDIATE');
+    try {
+      _database.execute(
+        'INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)',
+        [_tagStateMetadataKey, tagStateJson],
+      );
+      _database.execute(
+        'INSERT OR REPLACE INTO metadata(key, value) VALUES (?, ?)',
+        [_preferencesMetadataKey, preferencesJson],
+      );
+      _database.execute('COMMIT');
+    } catch (_) {
+      _database.execute('ROLLBACK');
       rethrow;
     }
   }
@@ -2163,6 +2218,8 @@ class ManagedLibrary {
           _migrateV3ToV4(database);
         case 4:
           _migrateV4ToV5(database);
+        case 5:
+          _migrateV5ToV6(database);
         case _schemaVersion:
           _createSchema(database);
         default:
@@ -2237,6 +2294,10 @@ class ManagedLibrary {
       FROM operations_v4
     ''');
     database.execute('DROP TABLE operations_v4');
+  }
+
+  static void _migrateV5ToV6(Database database) {
+    _createSchema(database);
   }
 
   static void _createSchema(Database database) {

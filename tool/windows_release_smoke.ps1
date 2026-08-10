@@ -104,6 +104,7 @@ function Wait-MainWindow([System.Diagnostics.Process]$Process) {
 function Invoke-PackagingCheck {
     $requiredFiles = @(
         'tagtag.exe',
+        'tagtag_explorer_bridge.exe',
         'flutter_windows.dll',
         'file_selector_windows_plugin.dll',
         'desktop_drop_plugin.dll'

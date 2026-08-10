@@ -93,6 +93,12 @@ void main() {
     );
     expect(chineseMessages, startsWith('; *** Inno Setup version 6.5.0+'));
     expect(installer, isNot(contains('[UninstallDelete]')));
+    expect(installer, contains('tagtag_explorer_bridge.exe'));
+    expect(installer, contains('Software\\Classes\\*\\shell\\TAGTAG'));
+    expect(
+      installer,
+      contains('Software\\Classes\\Directory\\shell\\TAGTAG'),
+    );
   });
 }
 

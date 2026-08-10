@@ -18,9 +18,22 @@ Future<String?> _pickStorageRoot() {
   return getDirectoryPath(confirmButtonText: '选择此文件夹');
 }
 
-void main() {
+void main(List<String> arguments) {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(TagTagApp(locator: LibraryLocator()));
+  runApp(
+    TagTagApp(
+      locator: LibraryLocator(),
+      initialExternalQuickTagPaths: _quickTagPathsFromArguments(arguments),
+    ),
+  );
+}
+
+List<String> _quickTagPathsFromArguments(List<String> arguments) {
+  final flagIndex = arguments.indexOf('--quick-tag');
+  if (flagIndex == -1) {
+    return const [];
+  }
+  return arguments.skip(flagIndex + 1).where((path) => path.isNotEmpty).toList();
 }
 
 class TagTagApp extends StatefulWidget {
@@ -29,11 +42,13 @@ class TagTagApp extends StatefulWidget {
     required this.locator,
     this.storageRootPicker = _pickStorageRoot,
     this.store,
+    this.initialExternalQuickTagPaths = const [],
   });
 
   final LibraryLocator locator;
   final StorageRootPicker storageRootPicker;
   final LocalStore? store;
+  final List<String> initialExternalQuickTagPaths;
 
   @override
   State<TagTagApp> createState() => _TagTagAppState();
@@ -231,6 +246,7 @@ class _TagTagAppState extends State<TagTagApp> {
         controller: controller,
         fileActions: _fileActions,
         onRestoreGlobalBackup: _restoreGlobalBackup,
+        initialExternalQuickTagPaths: widget.initialExternalQuickTagPaths,
       );
     }
     return _LibrarySetupScreen(

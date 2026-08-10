@@ -40,8 +40,6 @@ class GlobalBackupRestorer {
       );
     }
 
-    final previousState = await store.load();
-    final previousPreferences = await store.loadPreferences();
     final previousRoot = await locator.loadRoot();
     ManagedLibrary? restoredLibrary;
     try {
@@ -64,8 +62,6 @@ class GlobalBackupRestorer {
       );
     } catch (_) {
       await restoredLibrary?.close();
-      await store.save(previousState);
-      await store.savePreferences(previousPreferences);
       if (previousRoot != null) {
         await locator.saveRoot(previousRoot);
       }

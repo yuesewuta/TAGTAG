@@ -9,6 +9,8 @@ import 'package:path/path.dart' as path;
 
 import '../models/tag_models.dart';
 import '../platform/windows_file_actions.dart';
+import '../platform/windows_floating_drop_target.dart';
+import '../platform/windows_quick_tag_hotkey.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
 
@@ -18,12 +20,18 @@ class TagTagHome extends StatefulWidget {
     required this.controller,
     required this.fileActions,
     required this.onRestoreGlobalBackup,
+    this.quickTagHotkey,
+    this.floatingDropTarget,
+    this.initialExternalQuickTagPaths = const [],
   });
 
   final TagTagController controller;
   final WindowsFileActions fileActions;
   final Future<void> Function(Directory backup, Directory targetRoot)
   onRestoreGlobalBackup;
+  final WindowsQuickTagHotkey? quickTagHotkey;
+  final WindowsFloatingDropTarget? floatingDropTarget;
+  final List<String> initialExternalQuickTagPaths;
 
   @override
   State<TagTagHome> createState() => _TagTagHomeState();
@@ -32,6 +40,8 @@ class TagTagHome extends StatefulWidget {
 class _TagTagHomeState extends State<TagTagHome> {
   late final TextEditingController _searchController;
   late final FocusNode _searchFocusNode;
+  late final WindowsQuickTagHotkey _quickTagHotkey;
+  late final WindowsFloatingDropTarget _floatingDropTarget;
   bool _dragging = false;
   bool _importDialogOpen = false;
   bool _scanningConsistency = false;
@@ -48,6 +58,20 @@ class _TagTagHomeState extends State<TagTagHome> {
     super.initState();
     _searchController = TextEditingController(text: controller.searchTerm);
     _searchFocusNode = FocusNode();
+    _quickTagHotkey = widget.quickTagHotkey ?? WindowsQuickTagHotkey();
+    _floatingDropTarget =
+        widget.floatingDropTarget ?? WindowsFloatingDropTarget();
+    unawaited(_configureGlobalQuickTag());
+    unawaited(_configureFloatingDropTarget());
+    if (widget.initialExternalQuickTagPaths.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          unawaited(
+            _handleExternalQuickTagPaths(widget.initialExternalQuickTagPaths),
+          );
+        }
+      });
+    }
     unawaited(_scanConsistency());
     _consistencyTimer = Timer.periodic(
       const Duration(seconds: 15),
@@ -60,6 +84,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _consistencyTimer?.cancel();
+    unawaited(_quickTagHotkey.dispose());
     super.dispose();
   }
 
@@ -277,9 +302,18 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     await controller.updatePreferences(
       moveImportsByDefault: result.moveImportsByDefault,
+      floatingDropTargetEnabled: result.floatingDropTargetEnabled,
+    );
+    final floatingTargetEnabled = await _floatingDropTarget.setEnabled(
+      result.floatingDropTargetEnabled,
     );
     if (mounted) {
-      _showMessage('设置已保存。');
+      _showMessage(
+        floatingTargetEnabled == false && result.floatingDropTargetEnabled
+            ? '设置已保存，但悬浮接收目标未能启动。'
+            : '设置已保存。',
+        error: floatingTargetEnabled == false && result.floatingDropTargetEnabled,
+      );
     }
   }
 
@@ -662,6 +696,63 @@ class _TagTagHomeState extends State<TagTagHome> {
       () => controller.assignPlacementToSelection(placementId),
       successMessage: '已添加直接标签：${controller.pathOf(placementId)}',
     );
+  }
+
+  Future<void> _configureGlobalQuickTag() async {
+    final registered = await _quickTagHotkey.start(_handleGlobalQuickTag);
+    if (mounted && registered == false) {
+      _showMessage('全局 Quick Tag 未能注册。Ctrl+Shift+T 可能已被其他程序占用。', error: true);
+    }
+  }
+
+  Future<void> _configureFloatingDropTarget() async {
+    final enabled = controller.preferences.floatingDropTargetEnabled;
+    final applied = await _floatingDropTarget.setEnabled(enabled);
+    if (mounted && enabled && applied == false) {
+      _showMessage('悬浮接收目标未能启动。', error: true);
+    }
+  }
+
+  Future<void> _handleGlobalQuickTag(List<String> externalPaths) async {
+    if (_importDialogOpen || _restoringBackup) {
+      if (mounted && externalPaths.isNotEmpty) {
+        _showMessage('当前操作尚未完成，请稍后再次使用 Explorer 右键添加标签。', error: true);
+      }
+      return;
+    }
+    if (externalPaths.isNotEmpty) {
+      await _handleExternalQuickTagPaths(externalPaths);
+      return;
+    }
+    if (controller.selectedResourceIds.isNotEmpty) {
+      await _showQuickTag();
+      return;
+    }
+    await _chooseImportSource(_ImportSourceKind.files);
+  }
+
+  Future<void> _handleExternalQuickTagPaths(List<String> externalPaths) async {
+    final sources = <FileSystemEntity>[];
+    final seenPaths = <String>{};
+    for (final externalPath in externalPaths) {
+      final normalizedPath = path.normalize(File(externalPath).absolute.path);
+      if (!seenPaths.add(normalizedPath)) {
+        continue;
+      }
+      final type = await FileSystemEntity.type(normalizedPath);
+      if (type == FileSystemEntityType.file) {
+        sources.add(File(normalizedPath));
+      } else if (type == FileSystemEntityType.directory) {
+        sources.add(Directory(normalizedPath));
+      }
+    }
+    if (sources.isEmpty) {
+      if (mounted) {
+        _showMessage('Explorer 所选资源已不存在，无法添加标签。', error: true);
+      }
+      return;
+    }
+    await _showImportDialog(sources);
   }
 
   Future<void> _revealResource(TagResource resource) async {
@@ -2614,11 +2705,14 @@ class _SettingsDialog extends StatefulWidget {
 
 class _SettingsDialogState extends State<_SettingsDialog> {
   late bool _moveImportsByDefault;
+  late bool _floatingDropTargetEnabled;
 
   @override
   void initState() {
     super.initState();
     _moveImportsByDefault = widget.controller.preferences.moveImportsByDefault;
+    _floatingDropTargetEnabled =
+        widget.controller.preferences.floatingDropTargetEnabled;
   }
 
   @override
@@ -2670,6 +2764,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
               onSelectionChanged: (value) =>
                   setState(() => _moveImportsByDefault = value.first),
             ),
+            const Divider(height: 28),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.assistant_navigation),
+              title: const Text('悬浮接收目标'),
+              value: _floatingDropTargetEnabled,
+              onChanged: (value) =>
+                  setState(() => _floatingDropTargetEnabled = value),
+            ),
           ],
         ),
       ),
@@ -2681,7 +2784,10 @@ class _SettingsDialogState extends State<_SettingsDialog> {
         FilledButton.icon(
           onPressed: () => Navigator.pop(
             context,
-            _SettingsDraft(moveImportsByDefault: _moveImportsByDefault),
+            _SettingsDraft(
+              moveImportsByDefault: _moveImportsByDefault,
+              floatingDropTargetEnabled: _floatingDropTargetEnabled,
+            ),
           ),
           icon: const Icon(Icons.save_outlined),
           label: const Text('保存'),
@@ -2921,9 +3027,13 @@ class _TagDraft {
 }
 
 class _SettingsDraft {
-  const _SettingsDraft({required this.moveImportsByDefault});
+  const _SettingsDraft({
+    required this.moveImportsByDefault,
+    required this.floatingDropTargetEnabled,
+  });
 
   final bool moveImportsByDefault;
+  final bool floatingDropTargetEnabled;
 }
 
 enum _ImportSourceKind { files, folder }

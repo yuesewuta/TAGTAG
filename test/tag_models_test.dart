@@ -18,12 +18,104 @@ void main() {
     final store = LocalStore(baseDirectory: directory);
 
     await store.savePreferences(
-      const UserPreferences(moveImportsByDefault: true),
+      const UserPreferences(
+        moveImportsByDefault: true,
+        floatingDropTargetEnabled: true,
+      ),
     );
 
     final loaded = await LocalStore(baseDirectory: directory).loadPreferences();
     expect(loaded.moveImportsByDefault, isTrue);
+    expect(loaded.floatingDropTargetEnabled, isTrue);
   });
+
+  test('tag-domain metadata documents survive a library reopen', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-domain-metadata-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final library = await ManagedLibrary.initialize(root);
+    await library.writeTagDomainMetadata(
+      tagStateJson: '{"version":1,"spaces":[]}',
+      preferencesJson: '{"version":1,"moveImportsByDefault":true}',
+    );
+    await library.close();
+
+    final reopened = await ManagedLibrary.open(root);
+    addTearDown(reopened.close);
+    final metadata = await reopened.readTagDomainMetadata();
+
+    expect(metadata, isNotNull);
+    expect(metadata!.tagStateJson, '{"version":1,"spaces":[]}');
+    expect(
+      metadata.preferencesJson,
+      '{"version":1,"moveImportsByDefault":true}',
+    );
+  });
+
+  test(
+    'a managed library migrates legacy state once and stays authoritative',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-domain-migration-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final library = await ManagedLibrary.initialize(
+        Directory('${sandbox.path}/library'),
+      );
+      addTearDown(library.close);
+      final legacyStore = LocalStore(
+        baseDirectory: Directory('${sandbox.path}/legacy-config'),
+      );
+      await legacyStore.save(AppState.demo());
+      await legacyStore.savePreferences(
+        const UserPreferences(moveImportsByDefault: true),
+      );
+
+      final migrated = TagTagController(store: legacyStore, library: library);
+      await migrated.load();
+      await migrated.createSpace('SQLite 权威空间');
+      await migrated.updatePreferences(moveImportsByDefault: false);
+
+      await legacyStore.save(AppState.empty());
+      await legacyStore.savePreferences(
+        const UserPreferences(moveImportsByDefault: true),
+      );
+      final restarted = TagTagController(store: legacyStore, library: library);
+      await restarted.load();
+
+      expect(
+        restarted.state.spaces.map((space) => space.name),
+        contains('SQLite 权威空间'),
+      );
+      expect(restarted.preferences.moveImportsByDefault, isFalse);
+    },
+  );
+
+  test(
+    'invalid legacy state does not create partial library metadata',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-domain-invalid-migration-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final library = await ManagedLibrary.initialize(
+        Directory('${sandbox.path}/library'),
+      );
+      addTearDown(library.close);
+      final legacyStore = LocalStore(
+        baseDirectory: Directory('${sandbox.path}/legacy-config'),
+      );
+      final legacyDirectory = await legacyStore.directory;
+      await File('${legacyDirectory.path}/state.json').writeAsString('{broken');
+
+      final controller = TagTagController(store: legacyStore, library: library);
+
+      await expectLater(controller.load(), throwsA(isA<FormatException>()));
+      expect(await library.readTagDomainMetadata(), isNull);
+    },
+  );
 
   test(
     'normal selection replaces while explicit multi-selection accumulates',

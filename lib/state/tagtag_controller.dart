@@ -42,8 +42,18 @@ class TagTagController extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    _preferences = await store.loadPreferences();
-    _state = await store.load();
+    final managedLibrary = library;
+    final storedMetadata = await managedLibrary?.readTagDomainMetadata();
+    if (storedMetadata == null) {
+      _preferences = await store.loadPreferences();
+      _state = await store.load();
+      if (managedLibrary != null) {
+        await _persistTagDomainMetadata();
+      }
+    } else {
+      _preferences = _preferencesFromJson(storedMetadata.preferencesJson);
+      _state = _stateFromJson(storedMetadata.tagStateJson);
+    }
     if (_state.activeSpaceId == null && _state.spaces.isNotEmpty) {
       _state = _state.copyWith(activeSpaceId: _state.spaces.first.id);
     }
@@ -51,12 +61,16 @@ class TagTagController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updatePreferences({bool? moveImportsByDefault}) async {
+  Future<void> updatePreferences({
+    bool? moveImportsByDefault,
+    bool? floatingDropTargetEnabled,
+  }) async {
     _preferences = _preferences.copyWith(
       moveImportsByDefault: moveImportsByDefault,
+      floatingDropTargetEnabled: floatingDropTargetEnabled,
     );
     notifyListeners();
-    await store.savePreferences(_preferences);
+    await _persistTagDomainMetadata();
   }
 
   List<TagPlacement> get rootPlacements {
@@ -960,8 +974,10 @@ class TagTagController extends ChangeNotifier {
         : UserPreferences.fromJson(
             Map<String, dynamic>.from(jsonDecode(preferencesJson) as Map),
           );
-    await store.save(restoredState);
-    await store.savePreferences(restoredPreferences);
+    await _persistTagDomainMetadata(
+      state: restoredState,
+      preferences: restoredPreferences,
+    );
   }
 
   Future<void> restoreTagStateBackup(String path) async {
@@ -1021,7 +1037,7 @@ class TagTagController extends ChangeNotifier {
   Future<void> _update(AppState next) async {
     _state = next;
     notifyListeners();
-    await store.save(_state);
+    await _persistTagDomainMetadata();
   }
 
   Future<void> _syncManagedResources() async {
@@ -1067,7 +1083,41 @@ class TagTagController extends ChangeNotifier {
           )
           .toList(),
     );
-    await store.save(_state);
+    await _persistTagDomainMetadata();
+  }
+
+  AppState _stateFromJson(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! Map) {
+      throw const FormatException('TAGTAG 标签状态必须是 JSON 对象');
+    }
+    return AppState.fromJson(Map<String, dynamic>.from(decoded));
+  }
+
+  UserPreferences _preferencesFromJson(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! Map) {
+      throw const FormatException('TAGTAG 设置必须是 JSON 对象');
+    }
+    return UserPreferences.fromJson(Map<String, dynamic>.from(decoded));
+  }
+
+  Future<void> _persistTagDomainMetadata({
+    AppState? state,
+    UserPreferences? preferences,
+  }) async {
+    final nextState = state ?? _state;
+    final nextPreferences = preferences ?? _preferences;
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      await store.save(nextState);
+      await store.savePreferences(nextPreferences);
+      return;
+    }
+    await managedLibrary.writeTagDomainMetadata(
+      tagStateJson: jsonEncode(nextState.toJson()),
+      preferencesJson: jsonEncode(nextPreferences.toJson()),
+    );
   }
 
   TagResource _tagResourceFromManaged(ManagedResource managed) => TagResource(

@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
+  "tagtag_entrypoint_protocol.cpp"
   "utils.cpp"
   "windows_recycle_bin.cpp"
   "win32_window.cpp"
@@ -16,6 +17,14 @@ add_executable(${BINARY_NAME} WIN32
   "Runner.rc"
   "runner.exe.manifest"
 )
+
+add_executable(tagtag_explorer_bridge WIN32
+  "../entrypoints/tagtag_explorer_bridge.cpp"
+  "tagtag_entrypoint_protocol.cpp"
+)
+apply_standard_settings(tagtag_explorer_bridge)
+target_link_libraries(tagtag_explorer_bridge PRIVATE "shell32.lib")
+target_include_directories(tagtag_explorer_bridge PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 add_executable(tagtag_recycle_bin_smoke EXCLUDE_FROM_ALL
   "windows_recycle_bin.cpp"

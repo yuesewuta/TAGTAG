@@ -53,5 +53,13 @@ Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 Name: "{group}\TAGTAG"; Filename: "{app}\tagtag.exe"
 Name: "{autodesktop}\TAGTAG"; Filename: "{app}\tagtag.exe"; Tasks: desktopicon
 
+[Registry]
+Root: HKCU; Subkey: "Software\Classes\*\shell\TAGTAG"; ValueType: string; ValueData: "使用 TAGTAG 添加标签"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\*\shell\TAGTAG"; ValueName: "MultiSelectModel"; ValueType: string; ValueData: "Player"
+Root: HKCU; Subkey: "Software\Classes\*\shell\TAGTAG\command"; ValueType: string; ValueData: """{app}\tagtag_explorer_bridge.exe"" --quick-tag ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\TAGTAG"; ValueType: string; ValueData: "使用 TAGTAG 添加标签"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\TAGTAG"; ValueName: "MultiSelectModel"; ValueType: string; ValueData: "Player"
+Root: HKCU; Subkey: "Software\Classes\Directory\shell\TAGTAG\command"; ValueType: string; ValueData: """{app}\tagtag_explorer_bridge.exe"" --quick-tag ""%1"""
+
 [Run]
 Filename: "{app}\tagtag.exe"; Description: "{cm:LaunchProgram,TAGTAG}"; Flags: nowait postinstall skipifsilent
