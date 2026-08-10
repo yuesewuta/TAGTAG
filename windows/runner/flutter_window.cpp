@@ -171,7 +171,7 @@ bool FlutterWindow::OnCreate() {
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) {
         if (call.method_name() == "setEnabled") {
-          const auto* enabled = std::get_if<bool>(&call.arguments());
+          const auto* enabled = std::get_if<bool>(call.arguments());
           if (enabled == nullptr) {
             result->Error("invalid_arguments",
                           "Floating drop target requires a bool value");

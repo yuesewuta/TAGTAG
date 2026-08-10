@@ -139,9 +139,10 @@ void main() {
         channel.codec.encodeMethodCall(const MethodCall('activated')),
         (_) {},
       );
-      await tester.pumpAndSettle();
+      final quickTagDialog = find.text('为 1 项添加标签');
+      await _pumpUntilFound(tester, quickTagDialog);
 
-      expect(find.text('为 1 项添加标签'), findsOneWidget);
+      expect(quickTagDialog, findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },

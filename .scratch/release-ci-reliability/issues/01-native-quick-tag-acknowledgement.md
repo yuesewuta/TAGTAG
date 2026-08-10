@@ -16,3 +16,8 @@ publish the corrected Windows release.
 - 2026-08-10: The Explorer activation test now waits for its asynchronous
   filesystem validation to create the import dialog after the native message
   has been acknowledged.
+- 2026-08-10: The selected-resource activation test now waits for its dialog
+  instead of using `pumpAndSettle`, because the home screen owns a periodic
+  consistency scan. A clean Windows Release build also corrected the Explorer
+  bridge Windows-header include order and the current Flutter MethodCall
+  pointer API used by the floating drop target channel.
