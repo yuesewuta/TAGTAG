@@ -13,8 +13,8 @@ releases can complete their CI verification and publish artifacts.
 
 - Windows `activated` and `externalPaths` notifications return to the native
   caller before their Flutter UI workflow completes.
-- Regression coverage holds an activation UI workflow open while asserting the
-  platform message has already completed.
+- Regression coverage drives native activation through the selected-resource
+  and external-resource Quick Tag dialogs.
 - The tray lifecycle test asserts the implemented close-to-tray behavior
   without coupling to an internal `switch` layout.
 - The normal Windows Release build produces the Explorer bridge required by the

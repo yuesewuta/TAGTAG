@@ -10,5 +10,6 @@ publish the corrected Windows release.
 ## Comments
 
 - 2026-08-10: Native method-channel events now acknowledge before a
-  user-controlled Flutter dialog completes; the regression test keeps that
-  dialog workflow pending while asserting the platform response has returned.
+  user-controlled Flutter dialog completes. The app-initialization tests cover
+  selected-resource and external-resource dialog activation through the real
+  channel callback path.
