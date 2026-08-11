@@ -797,6 +797,8 @@ class _TagTagHomeState extends State<TagTagHome> {
                             controller.selectPlacement(placementId);
                             await _editActiveTag();
                           },
+                          onMerge: _showMergeTag,
+                          onSplit: _showSplitTag,
                           onDelete: (placementId) async {
                             controller.selectPlacement(placementId);
                             await _deleteActiveTag();
@@ -1251,6 +1253,68 @@ class _TagTagHomeState extends State<TagTagHome> {
       ),
       successMessage: '已更新标签实体；所有复用位置同步显示。',
     );
+  }
+
+  Future<void> _showMergeTag(String placementId) async {
+    final placement = controller.state.placementById(placementId);
+    final sourceTag = controller.tagForPlacement(placement);
+    final targets = controller.state.tags
+        .where(
+          (tag) =>
+              tag.spaceId == controller.activeSpaceId && tag.id != sourceTag.id,
+        )
+        .toList();
+    if (targets.isEmpty) {
+      _showMessage('当前空间没有可作为合并目标的其他标签实体。', error: true);
+      return;
+    }
+    final targetTagId = await showDialog<String>(
+      context: context,
+      builder: (context) => _MergeTagDialog(
+        controller: controller,
+        sourceTag: sourceTag,
+        targets: targets,
+      ),
+    );
+    if (targetTagId == null) {
+      return;
+    }
+    await _runAction(() async {
+      await controller.mergeTags(
+        targetTagId: targetTagId,
+        sourceTagIds: {sourceTag.id},
+      );
+    }, successMessage: '标签实体已合并；可在操作日志中撤销。');
+  }
+
+  Future<void> _showSplitTag(String placementId) async {
+    final placement = controller.state.placementById(placementId);
+    final tag = controller.tagForPlacement(placement);
+    final placements = controller.placementsInActiveSpace
+        .where((item) => item.tagId == tag.id)
+        .toList();
+    if (placements.length < 2) {
+      _showMessage('该标签实体只有一个位置，无需拆分。', error: true);
+      return;
+    }
+    final draft = await showDialog<_SplitTagDraft>(
+      context: context,
+      builder: (context) => _SplitTagDialog(
+        controller: controller,
+        tag: tag,
+        placements: placements,
+        initialPlacementId: placementId,
+      ),
+    );
+    if (draft == null) {
+      return;
+    }
+    await _runAction(() async {
+      await controller.splitTagPlacements(
+        placementIds: draft.placementIds,
+        newName: draft.name,
+      );
+    }, successMessage: '所选位置已拆分为独立标签实体；可在操作日志中撤销。');
   }
 
   Future<void> _deleteActiveTag() async {
@@ -1826,6 +1890,7 @@ class _OperationLogDialogState extends State<_OperationLogDialog> {
   late Future<List<ManagedOperation>> _operations;
   String? _error;
   String? _undoingId;
+  bool _showTagOperations = false;
 
   @override
   void initState() {
@@ -1852,106 +1917,138 @@ class _OperationLogDialogState extends State<_OperationLogDialog> {
               ),
               const SizedBox(height: 10),
             ],
-            Expanded(
-              child: FutureBuilder<List<ManagedOperation>>(
-                future: _operations,
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const Center(child: CircularProgressIndicator());
-                  }
-                  if (snapshot.hasError) {
-                    return Center(child: Text('读取操作日志失败：${snapshot.error}'));
-                  }
-                  final operations = snapshot.data ?? const [];
-                  if (operations.isEmpty) {
-                    return const Center(child: Text('还没有受管操作记录'));
-                  }
-                  return ListView.separated(
-                    itemCount: operations.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final operation = operations[index];
-                      final undone = operation.undoneAt != null;
-                      final IconData icon;
-                      final String title;
-                      final String subtitle;
-                      switch (operation.type) {
-                        case ManagedOperationType.importCopy:
-                          icon = Icons.content_copy_outlined;
-                          title = '复制导入';
-                          subtitle =
-                              '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
-                        case ManagedOperationType.importMove:
-                          icon = Icons.drive_file_move_outline;
-                          title = '移动导入';
-                          subtitle =
-                              '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
-                        case ManagedOperationType.exitRestore:
-                          icon = Icons.logout;
-                          title = '恢复原路径退出管理';
-                          subtitle =
-                              '存储根 / ${operation.destinationRelativePath}\n恢复到 ${operation.sourcePath}';
-                        case ManagedOperationType.exitMove:
-                          icon = Icons.drive_file_move_outline;
-                          title = '移动到指定位置退出管理';
-                          subtitle =
-                              '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
-                        case ManagedOperationType.exitRecycle:
-                          icon = Icons.delete_outline;
-                          title = '移入 Windows 回收站退出管理';
-                          subtitle =
-                              '存储根 / ${operation.destinationRelativePath}\nWindows 回收站';
-                        case ManagedOperationType.takeover:
-                          icon = Icons.add_task_outlined;
-                          title = '接管未受管内容';
-                          subtitle =
-                              '存储根 / ${operation.destinationRelativePath}';
-                        case ManagedOperationType.untrackedMoveOut:
-                          icon = Icons.drive_file_move_outline;
-                          title = '移出未受管内容';
-                          subtitle =
-                              '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
-                        case ManagedOperationType.externalMoveAccept:
-                          icon = Icons.link_outlined;
-                          title = '接受外部移动的新路径';
-                          subtitle =
-                              '原记录：存储根 / ${operation.destinationRelativePath}\n新路径：${operation.sourcePath}';
-                        case ManagedOperationType.externalMoveRestore:
-                          icon = Icons.settings_backup_restore;
-                          title = '恢复外部移动的记录路径';
-                          subtitle =
-                              '从 ${operation.sourcePath}\n恢复到：存储根 / ${operation.destinationRelativePath}';
-                      }
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: Icon(icon),
-                        title: Text(title),
-                        subtitle: Text(
-                          subtitle,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: undone
-                            ? const Text('已撤销')
-                            : IconButton(
-                                tooltip: '撤销此操作',
-                                onPressed: _undoingId == null
-                                    ? () => _undo(operation.id)
-                                    : null,
-                                icon: _undoingId == operation.id
-                                    ? const SizedBox.square(
-                                        dimension: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
-                                        ),
-                                      )
-                                    : const Icon(Icons.undo),
-                              ),
-                      );
-                    },
-                  );
+            Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<bool>(
+                segments: const [
+                  ButtonSegment(
+                    value: false,
+                    label: Text('资源操作'),
+                    icon: Icon(Icons.folder_outlined, size: 17),
+                  ),
+                  ButtonSegment(
+                    value: true,
+                    label: Text('标签操作'),
+                    icon: Icon(Icons.account_tree_outlined, size: 17),
+                  ),
+                ],
+                selected: {_showTagOperations},
+                onSelectionChanged: (selection) {
+                  setState(() {
+                    _showTagOperations = selection.single;
+                    _error = null;
+                  });
                 },
+                showSelectedIcon: false,
               ),
+            ),
+            const SizedBox(height: 10),
+            Expanded(
+              child: _showTagOperations
+                  ? _buildTagOperationList()
+                  : FutureBuilder<List<ManagedOperation>>(
+                      future: _operations,
+                      builder: (context, snapshot) {
+                        if (snapshot.connectionState != ConnectionState.done) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        if (snapshot.hasError) {
+                          return Center(
+                            child: Text('读取操作日志失败：${snapshot.error}'),
+                          );
+                        }
+                        final operations = snapshot.data ?? const [];
+                        if (operations.isEmpty) {
+                          return const Center(child: Text('还没有受管操作记录'));
+                        }
+                        return ListView.separated(
+                          itemCount: operations.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final operation = operations[index];
+                            final undone = operation.undoneAt != null;
+                            final IconData icon;
+                            final String title;
+                            final String subtitle;
+                            switch (operation.type) {
+                              case ManagedOperationType.importCopy:
+                                icon = Icons.content_copy_outlined;
+                                title = '复制导入';
+                                subtitle =
+                                    '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
+                              case ManagedOperationType.importMove:
+                                icon = Icons.drive_file_move_outline;
+                                title = '移动导入';
+                                subtitle =
+                                    '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
+                              case ManagedOperationType.exitRestore:
+                                icon = Icons.logout;
+                                title = '恢复原路径退出管理';
+                                subtitle =
+                                    '存储根 / ${operation.destinationRelativePath}\n恢复到 ${operation.sourcePath}';
+                              case ManagedOperationType.exitMove:
+                                icon = Icons.drive_file_move_outline;
+                                title = '移动到指定位置退出管理';
+                                subtitle =
+                                    '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
+                              case ManagedOperationType.exitRecycle:
+                                icon = Icons.delete_outline;
+                                title = '移入 Windows 回收站退出管理';
+                                subtitle =
+                                    '存储根 / ${operation.destinationRelativePath}\nWindows 回收站';
+                              case ManagedOperationType.takeover:
+                                icon = Icons.add_task_outlined;
+                                title = '接管未受管内容';
+                                subtitle =
+                                    '存储根 / ${operation.destinationRelativePath}';
+                              case ManagedOperationType.untrackedMoveOut:
+                                icon = Icons.drive_file_move_outline;
+                                title = '移出未受管内容';
+                                subtitle =
+                                    '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
+                              case ManagedOperationType.externalMoveAccept:
+                                icon = Icons.link_outlined;
+                                title = '接受外部移动的新路径';
+                                subtitle =
+                                    '原记录：存储根 / ${operation.destinationRelativePath}\n新路径：${operation.sourcePath}';
+                              case ManagedOperationType.externalMoveRestore:
+                                icon = Icons.settings_backup_restore;
+                                title = '恢复外部移动的记录路径';
+                                subtitle =
+                                    '从 ${operation.sourcePath}\n恢复到：存储根 / ${operation.destinationRelativePath}';
+                            }
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: Icon(icon),
+                              title: Text(title),
+                              subtitle: Text(
+                                subtitle,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              trailing: undone
+                                  ? const Text('已撤销')
+                                  : IconButton(
+                                      tooltip: '撤销此操作',
+                                      onPressed: _undoingId == null
+                                          ? () => _undo(operation.id)
+                                          : null,
+                                      icon: _undoingId == operation.id
+                                          ? const SizedBox.square(
+                                              dimension: 18,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          : const Icon(Icons.undo),
+                                    ),
+                            );
+                          },
+                        );
+                      },
+                    ),
             ),
           ],
         ),
@@ -1963,6 +2060,74 @@ class _OperationLogDialogState extends State<_OperationLogDialog> {
         ),
       ],
     );
+  }
+
+  Widget _buildTagOperationList() {
+    final operations = widget.controller.tagOperations;
+    if (operations.isEmpty) {
+      return const Center(child: Text('还没有标签操作记录'));
+    }
+    final latestActiveId = operations
+        .where((operation) => operation.undoneAt == null)
+        .map((operation) => operation.id)
+        .firstOrNull;
+    return ListView.separated(
+      itemCount: operations.length,
+      separatorBuilder: (_, _) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final operation = operations[index];
+        final undone = operation.undoneAt != null;
+        return ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(
+            operation.type == TagDomainOperationType.merge
+                ? Icons.merge_type
+                : Icons.call_split,
+          ),
+          title: Text(
+            operation.type == TagDomainOperationType.merge ? '合并标签' : '拆分标签',
+          ),
+          subtitle: Text(operation.summary),
+          trailing: undone
+              ? const Text('已撤销')
+              : IconButton(
+                  tooltip: operation.id == latestActiveId
+                      ? '撤销此标签操作'
+                      : '请先撤销较新的标签操作',
+                  onPressed:
+                      _undoingId == null && operation.id == latestActiveId
+                      ? () => _undoTag(operation.id)
+                      : null,
+                  icon: _undoingId == operation.id
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.undo),
+                ),
+        );
+      },
+    );
+  }
+
+  Future<void> _undoTag(String operationId) async {
+    setState(() {
+      _undoingId = operationId;
+      _error = null;
+    });
+    try {
+      await widget.controller.undoTagOperation(operationId);
+      if (mounted) {
+        setState(() => _undoingId = null);
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _undoingId = null;
+          _error = '撤销失败：$error';
+        });
+      }
+    }
   }
 
   Future<void> _undo(String operationId) async {
@@ -2198,6 +2363,8 @@ class _TagHierarchyNode extends StatelessWidget {
     required this.resourceBuilder,
     required this.onAddChild,
     required this.onEdit,
+    required this.onMerge,
+    required this.onSplit,
     required this.onDelete,
   });
 
@@ -2207,6 +2374,8 @@ class _TagHierarchyNode extends StatelessWidget {
   final Widget Function(TagResource resource) resourceBuilder;
   final Future<void> Function(String parentId) onAddChild;
   final Future<void> Function(String placementId) onEdit;
+  final Future<void> Function(String placementId) onMerge;
+  final Future<void> Function(String placementId) onSplit;
   final Future<void> Function(String placementId) onDelete;
 
   @override
@@ -2253,15 +2422,31 @@ class _TagHierarchyNode extends StatelessWidget {
               case _TagAction.edit:
                 unawaited(onEdit(placement.id));
                 break;
+              case _TagAction.merge:
+                unawaited(onMerge(placement.id));
+                break;
+              case _TagAction.split:
+                unawaited(onSplit(placement.id));
+                break;
               case _TagAction.delete:
                 unawaited(onDelete(placement.id));
                 break;
             }
           },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: _TagAction.addChild, child: Text('新建子标签')),
-            PopupMenuItem(value: _TagAction.edit, child: Text('编辑标签实体')),
-            PopupMenuItem(value: _TagAction.delete, child: Text('删除此位置')),
+          itemBuilder: (context) => [
+            const PopupMenuItem(
+              value: _TagAction.addChild,
+              child: Text('新建子标签'),
+            ),
+            const PopupMenuItem(value: _TagAction.edit, child: Text('编辑标签实体')),
+            const PopupMenuItem(value: _TagAction.merge, child: Text('合并到...')),
+            if (isReused)
+              const PopupMenuItem(
+                value: _TagAction.split,
+                child: Text('拆分位置...'),
+              ),
+            const PopupMenuDivider(),
+            const PopupMenuItem(value: _TagAction.delete, child: Text('删除此位置')),
           ],
         ),
       ],
@@ -2293,6 +2478,8 @@ class _TagHierarchyNode extends StatelessWidget {
             resourceBuilder: resourceBuilder,
             onAddChild: onAddChild,
             onEdit: onEdit,
+            onMerge: onMerge,
+            onSplit: onSplit,
             onDelete: onDelete,
           ),
       ],
@@ -2300,7 +2487,273 @@ class _TagHierarchyNode extends StatelessWidget {
   }
 }
 
-enum _TagAction { addChild, edit, delete }
+enum _TagAction { addChild, edit, merge, split, delete }
+
+class _MergeTagDialog extends StatefulWidget {
+  const _MergeTagDialog({
+    required this.controller,
+    required this.sourceTag,
+    required this.targets,
+  });
+
+  final TagTagController controller;
+  final TagDefinition sourceTag;
+  final List<TagDefinition> targets;
+
+  @override
+  State<_MergeTagDialog> createState() => _MergeTagDialogState();
+}
+
+class _MergeTagDialogState extends State<_MergeTagDialog> {
+  late String _targetTagId;
+  TagIdentityImpact? _impact;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _targetTagId = widget.targets.first.id;
+    _refreshImpact();
+  }
+
+  void _refreshImpact() {
+    try {
+      _impact = widget.controller.previewTagMerge(
+        targetTagId: _targetTagId,
+        sourceTagIds: {widget.sourceTag.id},
+      );
+      _error = null;
+    } catch (error) {
+      _impact = null;
+      _error = '$error';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('合并标签实体'),
+      content: SizedBox(
+        width: 520,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('来源：${widget.sourceTag.name}'),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: _targetTagId,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: '保留的目标标签实体'),
+              items: [
+                for (final tag in widget.targets)
+                  DropdownMenuItem(
+                    value: tag.id,
+                    child: Text('${tag.name}  ·  ${tag.id}'),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value == null) {
+                  return;
+                }
+                setState(() {
+                  _targetTagId = value;
+                  _refreshImpact();
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+            if (_impact case final impact?)
+              _TagImpactSummary(impact: impact)
+            else
+              Text(
+                _error ?? '无法计算影响',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: _impact == null
+              ? null
+              : () => Navigator.pop(context, _targetTagId),
+          icon: const Icon(Icons.merge_type),
+          label: const Text('确认合并'),
+        ),
+      ],
+    );
+  }
+}
+
+class _SplitTagDialog extends StatefulWidget {
+  const _SplitTagDialog({
+    required this.controller,
+    required this.tag,
+    required this.placements,
+    required this.initialPlacementId,
+  });
+
+  final TagTagController controller;
+  final TagDefinition tag;
+  final List<TagPlacement> placements;
+  final String initialPlacementId;
+
+  @override
+  State<_SplitTagDialog> createState() => _SplitTagDialogState();
+}
+
+class _SplitTagDialogState extends State<_SplitTagDialog> {
+  late final TextEditingController _nameController;
+  late final Set<String> _selectedPlacementIds;
+  TagIdentityImpact? _impact;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.tag.name);
+    _selectedPlacementIds = {widget.initialPlacementId};
+    _refreshImpact();
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _refreshImpact() {
+    try {
+      _impact = widget.controller.previewTagSplit(_selectedPlacementIds);
+      _error = null;
+    } catch (error) {
+      _impact = null;
+      _error = '$error';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('拆分标签位置'),
+      content: SizedBox(
+        width: 580,
+        height: 470,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: _nameController,
+              decoration: const InputDecoration(labelText: '新标签实体名称'),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '拆分位置',
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 4),
+            Expanded(
+              child: ListView(
+                children: [
+                  for (final placement in widget.placements)
+                    CheckboxListTile(
+                      value: _selectedPlacementIds.contains(placement.id),
+                      title: Text(widget.controller.pathOf(placement.id)),
+                      subtitle: Text(placement.id),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      onChanged: (selected) {
+                        setState(() {
+                          if (selected ?? false) {
+                            _selectedPlacementIds.add(placement.id);
+                          } else {
+                            _selectedPlacementIds.remove(placement.id);
+                          }
+                          _refreshImpact();
+                        });
+                      },
+                    ),
+                ],
+              ),
+            ),
+            if (_impact case final impact?)
+              _TagImpactSummary(impact: impact)
+            else
+              Text(
+                _error ?? '无法计算影响',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton.icon(
+          onPressed: _impact == null
+              ? null
+              : () => Navigator.pop(
+                  context,
+                  _SplitTagDraft(
+                    placementIds: Set.of(_selectedPlacementIds),
+                    name: _nameController.text,
+                  ),
+                ),
+          icon: const Icon(Icons.call_split),
+          label: const Text('确认拆分'),
+        ),
+      ],
+    );
+  }
+}
+
+class _TagImpactSummary extends StatelessWidget {
+  const _TagImpactSummary({required this.impact});
+
+  final TagIdentityImpact impact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '影响预览',
+          style: Theme.of(
+            context,
+          ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: [
+            Chip(label: Text('${impact.placementCount} 个标签位置')),
+            Chip(label: Text('${impact.assignmentCount} 条直接标注')),
+            Chip(label: Text('${impact.resourceCount} 个资源')),
+            Chip(label: Text('${impact.inheritanceRuleCount} 条继承规则')),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SplitTagDraft {
+  const _SplitTagDraft({required this.placementIds, required this.name});
+
+  final Set<String> placementIds;
+  final String name;
+}
 
 enum _MoveConflictChoice { rename, chooseOther }
 

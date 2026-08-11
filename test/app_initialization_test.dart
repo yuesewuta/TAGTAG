@@ -256,6 +256,130 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('tag identity operations appear in the operation log and undo', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(960, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('tagtag-tag-log-ui-'),
+    ))!;
+    addTearDown(() => sandbox.delete(recursive: true));
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await tester.runAsync(() => store.save(AppState.demo()));
+    final controller = TagTagController(store: store);
+    await tester.runAsync(controller.load);
+    await tester.runAsync(
+      () => controller.splitTagPlacements(
+        placementIds: const {'place-project-design-reference'},
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TagTagHome(
+          controller: controller,
+          fileActions: WindowsFileActions(),
+          onRestoreGlobalBackup: (_, _) async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byTooltip('操作日志'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('标签操作'));
+    await tester.pump();
+
+    expect(find.text('拆分标签'), findsOneWidget);
+    expect(find.textContaining('拆分 1 个位置'), findsOneWidget);
+    await tester.tap(find.byTooltip('撤销此标签操作'));
+    await tester.pumpAndSettle();
+
+    expect(controller.tagOperations.single.undoneAt, isNotNull);
+    expect(find.text('已撤销'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('tag hierarchy exposes merge and split impact previews', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1100, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('tagtag-tag-impact-ui-'),
+    ))!;
+    addTearDown(() => sandbox.delete(recursive: true));
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await tester.runAsync(() => store.save(AppState.demo()));
+    final controller = TagTagController(store: store);
+    await tester.runAsync(controller.load);
+    controller.showTagHierarchy();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TagTagHome(
+          controller: controller,
+          fileActions: WindowsFileActions(),
+          onRestoreGlobalBackup: (_, _) async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设计'));
+    await tester.pumpAndSettle();
+
+    final reusedReference = find.text('参考').first;
+    final reusedTile = find.ancestor(
+      of: reusedReference,
+      matching: find.byType(ListTile),
+    );
+    await tester.tap(
+      find.descendant(of: reusedTile.first, matching: find.byTooltip('标签操作')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('拆分位置...'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('拆分标签位置'), findsOneWidget);
+    expect(find.text('影响预览'), findsOneWidget);
+    expect(find.text('1 个标签位置'), findsOneWidget);
+    expect(find.byType(CheckboxListTile), findsNWidgets(2));
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('阅读'));
+    await tester.pumpAndSettle();
+    final independentReference = find.text('参考').last;
+    final independentTile = find.ancestor(
+      of: independentReference,
+      matching: find.byType(ListTile),
+    );
+    await tester.tap(
+      find.descendant(
+        of: independentTile.first,
+        matching: find.byTooltip('标签操作'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('合并到...'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('合并标签实体'), findsOneWidget);
+    expect(find.text('影响预览'), findsOneWidget);
+    expect(find.text('确认合并'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Explorer Quick Tag activation opens the import-and-tag dialog', (
     tester,
   ) async {

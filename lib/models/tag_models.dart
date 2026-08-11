@@ -4,6 +4,8 @@ enum ResourceKind { file, folder }
 
 enum UsageEventType { opened, tagged, searched }
 
+enum TagDomainOperationType { merge, split }
+
 String newId(String prefix) {
   final random = Random.secure().nextInt(1 << 32).toRadixString(16);
   return '$prefix-${DateTime.now().microsecondsSinceEpoch}-$random';
@@ -266,6 +268,60 @@ class UsageEvent {
   );
 }
 
+class TagDomainOperation {
+  const TagDomainOperation({
+    required this.id,
+    required this.spaceId,
+    required this.type,
+    required this.summary,
+    required this.context,
+    required this.createdAt,
+    required this.undoneAt,
+  });
+
+  final String id;
+  final String spaceId;
+  final TagDomainOperationType type;
+  final String summary;
+  final Map<String, dynamic> context;
+  final DateTime createdAt;
+  final DateTime? undoneAt;
+
+  TagDomainOperation copyWith({DateTime? undoneAt}) => TagDomainOperation(
+    id: id,
+    spaceId: spaceId,
+    type: type,
+    summary: summary,
+    context: context,
+    createdAt: createdAt,
+    undoneAt: undoneAt ?? this.undoneAt,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'spaceId': spaceId,
+    'type': type.name,
+    'summary': summary,
+    'context': context,
+    'createdAt': createdAt.toIso8601String(),
+    'undoneAt': undoneAt?.toIso8601String(),
+  };
+
+  factory TagDomainOperation.fromJson(Map<String, dynamic> json) =>
+      TagDomainOperation(
+        id: json['id'] as String,
+        spaceId: json['spaceId'] as String,
+        type: TagDomainOperationType.values.byName(json['type'] as String),
+        summary: json['summary'] as String,
+        context: Map<String, dynamic>.from(json['context'] as Map),
+        createdAt: DateTime.parse(json['createdAt'] as String),
+        undoneAt: switch (json['undoneAt']) {
+          final String value => DateTime.parse(value),
+          _ => null,
+        },
+      );
+}
+
 class AppState {
   const AppState({
     required this.spaces,
@@ -277,6 +333,7 @@ class AppState {
     required this.folderTagInheritances,
     required this.usageEvents,
     required this.activeSpaceId,
+    this.tagOperations = const [],
   });
 
   final List<TagSpace> spaces;
@@ -288,6 +345,7 @@ class AppState {
   final List<FolderTagInheritance> folderTagInheritances;
   final List<UsageEvent> usageEvents;
   final String? activeSpaceId;
+  final List<TagDomainOperation> tagOperations;
 
   factory AppState.empty() => const AppState(
     spaces: [],
@@ -299,6 +357,7 @@ class AppState {
     folderTagInheritances: [],
     usageEvents: [],
     activeSpaceId: null,
+    tagOperations: [],
   );
 
   factory AppState.demo() {
@@ -539,6 +598,7 @@ class AppState {
     List<TagAssignment>? assignments,
     List<FolderTagInheritance>? folderTagInheritances,
     List<UsageEvent>? usageEvents,
+    List<TagDomainOperation>? tagOperations,
     String? activeSpaceId,
     bool clearActiveSpace = false,
   }) => AppState(
@@ -550,6 +610,7 @@ class AppState {
     assignments: assignments ?? this.assignments,
     folderTagInheritances: folderTagInheritances ?? this.folderTagInheritances,
     usageEvents: usageEvents ?? this.usageEvents,
+    tagOperations: tagOperations ?? this.tagOperations,
     activeSpaceId: clearActiveSpace
         ? null
         : activeSpaceId ?? this.activeSpaceId,
@@ -659,7 +720,7 @@ class AppState {
   }
 
   Map<String, dynamic> toJson() => {
-    'version': 3,
+    'version': 4,
     'activeSpaceId': activeSpaceId,
     'spaces': spaces.map((item) => item.toJson()).toList(),
     'tags': tags.map((item) => item.toJson()).toList(),
@@ -671,6 +732,7 @@ class AppState {
         .map((item) => item.toJson())
         .toList(),
     'usageEvents': usageEvents.map((item) => item.toJson()).toList(),
+    'tagOperations': tagOperations.map((item) => item.toJson()).toList(),
   };
 
   factory AppState.fromJson(Map<String, dynamic> json) {
@@ -718,6 +780,11 @@ class AppState {
               .toList(),
       usageEvents: (json['usageEvents'] as List<dynamic>)
           .map((item) => UsageEvent.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      tagOperations: (json['tagOperations'] as List<dynamic>? ?? const [])
+          .map(
+            (item) => TagDomainOperation.fromJson(item as Map<String, dynamic>),
+          )
           .toList(),
     );
   }

@@ -32,6 +32,26 @@ class EffectiveTagView {
   bool get isInherited => inheritedSources.isNotEmpty;
 }
 
+class TagIdentityImpact {
+  const TagIdentityImpact({
+    required this.type,
+    required this.sourceTags,
+    required this.targetTag,
+    required this.placementCount,
+    required this.assignmentCount,
+    required this.resourceCount,
+    required this.inheritanceRuleCount,
+  });
+
+  final TagDomainOperationType type;
+  final List<TagDefinition> sourceTags;
+  final TagDefinition? targetTag;
+  final int placementCount;
+  final int assignmentCount;
+  final int resourceCount;
+  final int inheritanceRuleCount;
+}
+
 class TagTagController extends ChangeNotifier {
   TagTagController({required this.store, this.library, this.recycleBin});
 
@@ -82,6 +102,12 @@ class TagTagController extends ChangeNotifier {
     }
     final matches = _state.spaces.where((space) => space.id == id);
     return matches.isEmpty ? null : matches.first;
+  }
+
+  List<TagDomainOperation> get tagOperations {
+    final operations = _state.tagOperations.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return operations;
   }
 
   Future<void> load() async {
@@ -607,6 +633,299 @@ class TagTagController extends ChangeNotifier {
               (tag) => tag.id == tagId
                   ? tag.copyWith(name: cleanName, colorValue: colorValue)
                   : tag,
+            )
+            .toList(),
+      ),
+    );
+  }
+
+  TagIdentityImpact previewTagMerge({
+    required String targetTagId,
+    required Set<String> sourceTagIds,
+  }) {
+    final spaceId = _requireActiveSpace();
+    final normalizedSources = sourceTagIds.difference({targetTagId});
+    if (normalizedSources.isEmpty) {
+      throw ArgumentError('请至少选择一个不同的来源标签实体');
+    }
+    final target = _tagInSpace(targetTagId, spaceId);
+    final sources = normalizedSources
+        .map((tagId) => _tagInSpace(tagId, spaceId))
+        .toList();
+    final placementIds = _state.placements
+        .where(
+          (placement) =>
+              placement.spaceId == spaceId &&
+              normalizedSources.contains(placement.tagId),
+        )
+        .map((placement) => placement.id)
+        .toSet();
+    return _tagIdentityImpact(
+      type: TagDomainOperationType.merge,
+      sourceTags: sources,
+      targetTag: target,
+      placementIds: placementIds,
+      inheritanceTagIds: normalizedSources,
+    );
+  }
+
+  Future<TagDomainOperation> mergeTags({
+    required String targetTagId,
+    required Set<String> sourceTagIds,
+  }) async {
+    final impact = previewTagMerge(
+      targetTagId: targetTagId,
+      sourceTagIds: sourceTagIds,
+    );
+    final sourceIds = impact.sourceTags.map((tag) => tag.id).toSet();
+    final affectedTagIds = {targetTagId, ...sourceIds};
+    final changedPlacements = _state.placements
+        .where((placement) => sourceIds.contains(placement.tagId))
+        .toList();
+    final rulesBefore = _state.folderTagInheritances
+        .where((rule) => affectedTagIds.contains(rule.tagId))
+        .toList();
+    final nextRules = _state.folderTagInheritances
+        .where((rule) => !sourceIds.contains(rule.tagId))
+        .toList();
+    final ruleKeys = {
+      for (final rule in nextRules) '${rule.folderResourceId}|${rule.tagId}',
+    };
+    for (final rule in _state.folderTagInheritances.where(
+      (item) => sourceIds.contains(item.tagId),
+    )) {
+      final key = '${rule.folderResourceId}|$targetTagId';
+      if (ruleKeys.add(key)) {
+        nextRules.add(
+          FolderTagInheritance(
+            id: rule.id,
+            folderResourceId: rule.folderResourceId,
+            tagId: targetTagId,
+            createdAt: rule.createdAt,
+          ),
+        );
+      }
+    }
+    final operation = TagDomainOperation(
+      id: newId('tag-operation'),
+      spaceId: _requireActiveSpace(),
+      type: TagDomainOperationType.merge,
+      summary:
+          '合并“${impact.sourceTags.map((tag) => tag.name).join('、')}”到“${impact.targetTag!.name}”',
+      context: _tagOperationContext(
+        affectedTagIds: affectedTagIds,
+        tagsBefore: _state.tags
+            .where((tag) => affectedTagIds.contains(tag.id))
+            .toList(),
+        placementsBefore: changedPlacements,
+        rulesBefore: rulesBefore,
+      ),
+      createdAt: DateTime.now(),
+      undoneAt: null,
+    );
+    searchAndTagIds.removeAll(sourceIds);
+    searchOrTagIds.removeAll(sourceIds);
+    searchNotTagIds.removeAll(sourceIds);
+    await _update(
+      _state.copyWith(
+        tags: _state.tags.where((tag) => !sourceIds.contains(tag.id)).toList(),
+        placements: _state.placements
+            .map(
+              (placement) => sourceIds.contains(placement.tagId)
+                  ? TagPlacement(
+                      id: placement.id,
+                      spaceId: placement.spaceId,
+                      tagId: targetTagId,
+                      parentId: placement.parentId,
+                      sortOrder: placement.sortOrder,
+                    )
+                  : placement,
+            )
+            .toList(),
+        folderTagInheritances: nextRules,
+        tagOperations: [..._state.tagOperations, operation],
+      ),
+    );
+    return operation;
+  }
+
+  TagIdentityImpact previewTagSplit(Set<String> placementIds) {
+    final split = _validatedSplitPlacements(placementIds);
+    final sourceTag = _state.tagById(split.first.tagId);
+    return _tagIdentityImpact(
+      type: TagDomainOperationType.split,
+      sourceTags: [sourceTag],
+      targetTag: null,
+      placementIds: placementIds,
+      inheritanceTagIds: {sourceTag.id},
+    );
+  }
+
+  Future<TagDomainOperation> splitTagPlacements({
+    required Set<String> placementIds,
+    String? newName,
+    int? newColorValue,
+  }) async {
+    final impact = previewTagSplit(placementIds);
+    final placements = _validatedSplitPlacements(placementIds);
+    final originalTag = impact.sourceTags.single;
+    final cleanName = newName?.trim();
+    final newTag = TagDefinition(
+      id: newId('tag'),
+      spaceId: originalTag.spaceId,
+      name: cleanName == null || cleanName.isEmpty
+          ? originalTag.name
+          : cleanName,
+      colorValue: newColorValue ?? originalTag.colorValue,
+      createdAt: DateTime.now(),
+    );
+    final selectedIds = placements.map((placement) => placement.id).toSet();
+    final oldTagPlacementIds = _state.placements
+        .where((placement) => placement.tagId == originalTag.id)
+        .map((placement) => placement.id)
+        .toSet();
+    final retainedIds = oldTagPlacementIds.difference(selectedIds);
+    final rulesBefore = _state.folderTagInheritances
+        .where((rule) => rule.tagId == originalTag.id)
+        .toList();
+    final nextRules = _state.folderTagInheritances
+        .where((rule) => rule.tagId != originalTag.id)
+        .toList();
+    for (final rule in rulesBefore) {
+      final assignedPlacementIds = _state.assignments
+          .where((assignment) => assignment.resourceId == rule.folderResourceId)
+          .map((assignment) => assignment.placementId)
+          .toSet();
+      final hasSelected = assignedPlacementIds.any(selectedIds.contains);
+      final hasRetained = assignedPlacementIds.any(retainedIds.contains);
+      if (hasSelected && !hasRetained) {
+        nextRules.add(
+          FolderTagInheritance(
+            id: rule.id,
+            folderResourceId: rule.folderResourceId,
+            tagId: newTag.id,
+            createdAt: rule.createdAt,
+          ),
+        );
+      } else {
+        nextRules.add(rule);
+        if (hasSelected && hasRetained) {
+          nextRules.add(
+            FolderTagInheritance(
+              id: newId('inheritance'),
+              folderResourceId: rule.folderResourceId,
+              tagId: newTag.id,
+              createdAt: DateTime.now(),
+            ),
+          );
+        }
+      }
+    }
+    final operation = TagDomainOperation(
+      id: newId('tag-operation'),
+      spaceId: _requireActiveSpace(),
+      type: TagDomainOperationType.split,
+      summary: '从“${originalTag.name}”拆分 ${placements.length} 个位置',
+      context: _tagOperationContext(
+        affectedTagIds: {originalTag.id, newTag.id},
+        tagsBefore: [originalTag],
+        placementsBefore: placements,
+        rulesBefore: rulesBefore,
+      ),
+      createdAt: DateTime.now(),
+      undoneAt: null,
+    );
+    await _update(
+      _state.copyWith(
+        tags: [..._state.tags, newTag],
+        placements: _state.placements
+            .map(
+              (placement) => selectedIds.contains(placement.id)
+                  ? TagPlacement(
+                      id: placement.id,
+                      spaceId: placement.spaceId,
+                      tagId: newTag.id,
+                      parentId: placement.parentId,
+                      sortOrder: placement.sortOrder,
+                    )
+                  : placement,
+            )
+            .toList(),
+        folderTagInheritances: nextRules,
+        tagOperations: [..._state.tagOperations, operation],
+      ),
+    );
+    return operation;
+  }
+
+  Future<void> undoTagOperation(String operationId) async {
+    final matches = _state.tagOperations.where(
+      (operation) => operation.id == operationId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(operationId, 'operationId', '找不到标签操作记录');
+    }
+    final operation = matches.single;
+    if (operation.undoneAt != null) {
+      throw StateError('该标签操作已经撤销');
+    }
+    final active =
+        _state.tagOperations.where((item) => item.undoneAt == null).toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    if (active.last.id != operationId) {
+      throw StateError('标签操作必须按从新到旧的顺序撤销');
+    }
+    final context = operation.context;
+    final affectedTagIds = (context['affectedTagIds'] as List<dynamic>)
+        .cast<String>()
+        .toSet();
+    final tagsBefore = (context['tagsBefore'] as List<dynamic>)
+        .map(
+          (item) =>
+              TagDefinition.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+    final placementsBefore = (context['placementsBefore'] as List<dynamic>)
+        .map(
+          (item) =>
+              TagPlacement.fromJson(Map<String, dynamic>.from(item as Map)),
+        )
+        .toList();
+    final placementBeforeById = {
+      for (final placement in placementsBefore) placement.id: placement,
+    };
+    final rulesBefore = (context['rulesBefore'] as List<dynamic>)
+        .map(
+          (item) => FolderTagInheritance.fromJson(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+    final ruleFolderIds = (context['ruleFolderIds'] as List<dynamic>)
+        .cast<String>()
+        .toSet();
+    await _update(
+      _state.copyWith(
+        tags: [
+          ..._state.tags.where((tag) => !affectedTagIds.contains(tag.id)),
+          ...tagsBefore,
+        ],
+        placements: _state.placements
+            .map((placement) => placementBeforeById[placement.id] ?? placement)
+            .toList(),
+        folderTagInheritances: [
+          ..._state.folderTagInheritances.where(
+            (rule) =>
+                !affectedTagIds.contains(rule.tagId) ||
+                !ruleFolderIds.contains(rule.folderResourceId),
+          ),
+          ...rulesBefore,
+        ],
+        tagOperations: _state.tagOperations
+            .map(
+              (item) => item.id == operationId
+                  ? item.copyWith(undoneAt: DateTime.now())
+                  : item,
             )
             .toList(),
       ),
@@ -1279,6 +1598,139 @@ class TagTagController extends ChangeNotifier {
     activeView = ResourceView.all;
     await _update(restored);
   }
+
+  String _requireActiveSpace() {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      throw StateError('请先创建标签空间');
+    }
+    return spaceId;
+  }
+
+  TagDefinition _tagInSpace(String tagId, String spaceId) {
+    final matches = _state.tags.where(
+      (tag) => tag.id == tagId && tag.spaceId == spaceId,
+    );
+    if (matches.isEmpty) {
+      throw ArgumentError.value(tagId, 'tagId', '找不到当前空间中的标签实体');
+    }
+    return matches.single;
+  }
+
+  List<TagPlacement> _validatedSplitPlacements(Set<String> placementIds) {
+    final spaceId = _requireActiveSpace();
+    if (placementIds.isEmpty) {
+      throw ArgumentError('请至少选择一个待拆分标签位置');
+    }
+    final placements = placementIds.map((placementId) {
+      final matches = _state.placements.where(
+        (placement) =>
+            placement.id == placementId && placement.spaceId == spaceId,
+      );
+      if (matches.isEmpty) {
+        throw ArgumentError.value(placementId, 'placementIds', '找不到当前空间中的标签位置');
+      }
+      return matches.single;
+    }).toList();
+    final tagIds = placements.map((placement) => placement.tagId).toSet();
+    if (tagIds.length != 1) {
+      throw StateError('只能一次拆分同一个标签实体的位置');
+    }
+    final allPlacements = _state.placements
+        .where(
+          (placement) =>
+              placement.spaceId == spaceId && placement.tagId == tagIds.single,
+        )
+        .toList();
+    if (allPlacements.length < 2) {
+      throw StateError('该标签实体只有一个位置，无需拆分');
+    }
+    if (placements.length == allPlacements.length) {
+      throw StateError('必须至少保留一个原标签位置');
+    }
+    return placements;
+  }
+
+  TagIdentityImpact _tagIdentityImpact({
+    required TagDomainOperationType type,
+    required List<TagDefinition> sourceTags,
+    required TagDefinition? targetTag,
+    required Set<String> placementIds,
+    required Set<String> inheritanceTagIds,
+  }) {
+    if (type == TagDomainOperationType.merge) {
+      _validateMergedPlacementStructure(
+        targetTag!.id,
+        sourceTags.map((tag) => tag.id).toSet(),
+      );
+    }
+    final assignments = _state.assignments
+        .where((assignment) => placementIds.contains(assignment.placementId))
+        .toList();
+    return TagIdentityImpact(
+      type: type,
+      sourceTags: sourceTags,
+      targetTag: targetTag,
+      placementCount: placementIds.length,
+      assignmentCount: assignments.length,
+      resourceCount: assignments
+          .map((assignment) => assignment.resourceId)
+          .toSet()
+          .length,
+      inheritanceRuleCount: _state.folderTagInheritances
+          .where((rule) => inheritanceTagIds.contains(rule.tagId))
+          .length,
+    );
+  }
+
+  void _validateMergedPlacementStructure(
+    String targetTagId,
+    Set<String> sourceTagIds,
+  ) {
+    final spaceId = _requireActiveSpace();
+    final placements = _state.placementsForSpace(spaceId);
+    final nextTagByPlacementId = {
+      for (final placement in placements)
+        placement.id: sourceTagIds.contains(placement.tagId)
+            ? targetTagId
+            : placement.tagId,
+    };
+    final siblingKeys = <String>{};
+    for (final placement in placements) {
+      final tagId = nextTagByPlacementId[placement.id]!;
+      final key = '${placement.parentId ?? '<root>'}|$tagId';
+      if (!siblingKeys.add(key)) {
+        throw StateError('合并会在同一父级产生重复标签位置，请先移动或删除其中一个位置');
+      }
+      final seen = <String>{};
+      var parentId = placement.parentId;
+      while (parentId != null && seen.add(parentId)) {
+        if (nextTagByPlacementId[parentId] == tagId) {
+          throw StateError('合并会让标签实体进入自己的层级路径，无法执行');
+        }
+        final parents = placements.where((item) => item.id == parentId);
+        parentId = parents.isEmpty ? null : parents.single.parentId;
+      }
+    }
+  }
+
+  Map<String, dynamic> _tagOperationContext({
+    required Set<String> affectedTagIds,
+    required List<TagDefinition> tagsBefore,
+    required List<TagPlacement> placementsBefore,
+    required List<FolderTagInheritance> rulesBefore,
+  }) => {
+    'affectedTagIds': affectedTagIds.toList(),
+    'tagsBefore': tagsBefore.map((tag) => tag.toJson()).toList(),
+    'placementsBefore': placementsBefore
+        .map((placement) => placement.toJson())
+        .toList(),
+    'rulesBefore': rulesBefore.map((rule) => rule.toJson()).toList(),
+    'ruleFolderIds': rulesBefore
+        .map((rule) => rule.folderResourceId)
+        .toSet()
+        .toList(),
+  };
 
   Set<String>? _matchingResourceIds() {
     if (activeView == ResourceView.recent) {
