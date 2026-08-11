@@ -1,6 +1,6 @@
 # 03 - Portability UI, verification, and v0.10.0 release
 
-State: claimed
+State: resolved
 Type: task
 Blocked by: 01, 02
 
