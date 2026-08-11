@@ -312,7 +312,8 @@ class _TagTagHomeState extends State<TagTagHome> {
         floatingTargetEnabled == false && result.floatingDropTargetEnabled
             ? '设置已保存，但悬浮接收目标未能启动。'
             : '设置已保存。',
-        error: floatingTargetEnabled == false && result.floatingDropTargetEnabled,
+        error:
+            floatingTargetEnabled == false && result.floatingDropTargetEnabled,
       );
     }
   }
@@ -391,7 +392,7 @@ class _TagTagHomeState extends State<TagTagHome> {
               decoration: InputDecoration(
                 isDense: true,
                 prefixIcon: const Icon(Icons.search, size: 20),
-                hintText: '搜索名称或路径',
+                hintText: '搜索名称、路径或标签',
                 suffixIcon: _searchController.text.isEmpty
                     ? null
                     : IconButton(
@@ -428,13 +429,14 @@ class _TagTagHomeState extends State<TagTagHome> {
   }
 
   Widget _buildResourceRow(TagResource resource, bool compact) {
-    final tags = controller.assignmentsForResource(resource.id);
+    final directTags = controller.assignmentsForResource(resource.id);
+    final effectiveTags = controller.effectiveTagsForResource(resource.id);
     return _ResourceRow(
       resource: resource,
       selected: controller.selectedResourceIds.contains(resource.id),
       multiSelectMode: _multiSelectMode,
       compact: compact,
-      tags: tags,
+      tags: effectiveTags,
       controller: controller,
       onTap: () {
         if (_multiSelectMode) {
@@ -451,7 +453,9 @@ class _TagTagHomeState extends State<TagTagHome> {
       onOpen: () => _openResource(resource),
       onReveal: () => _revealResource(resource),
       onAddTag: () => _addTagToResource(resource),
-      onClearTags: tags.isEmpty ? null : () => _clearTagsForResource(resource),
+      onClearTags: directTags.isEmpty
+          ? null
+          : () => _clearTagsForResource(resource),
       onMove: () => _moveResourceToSpecifiedPath(resource),
       onRecycle: () => _recycleResource(resource),
       onRestore: () => _restoreResource(resource),
@@ -685,16 +689,21 @@ class _TagTagHomeState extends State<TagTagHome> {
       _showMessage('先选择至少一个文件或文件夹。');
       return;
     }
-    final placementId = await showDialog<String>(
+    final result = await showDialog<_QuickTagDraft>(
       context: context,
       builder: (context) => _QuickTagDialog(controller: controller),
     );
-    if (placementId == null) {
+    if (result == null) {
       return;
     }
     await _runAction(
-      () => controller.assignPlacementToSelection(placementId),
-      successMessage: '已添加直接标签：${controller.pathOf(placementId)}',
+      () => controller.assignPlacementToSelection(
+        result.placementId,
+        inheritChildren: result.inheritChildren,
+      ),
+      successMessage: result.inheritChildren == true
+          ? '已添加直接标签并启用子项继承：${controller.pathOf(result.placementId)}'
+          : '已添加直接标签：${controller.pathOf(result.placementId)}',
     );
   }
 
@@ -2042,7 +2051,7 @@ class _ResourceHeader extends StatelessWidget {
         children: [
           if (multiSelectMode) const SizedBox(width: 42),
           const Expanded(flex: 4, child: _ColumnLabel('名称')),
-          if (!compact) const Expanded(flex: 3, child: _ColumnLabel('直接标签')),
+          if (!compact) const Expanded(flex: 3, child: _ColumnLabel('有效标签')),
           const Expanded(flex: 2, child: _ColumnLabel('修改时间')),
           const SizedBox(width: 242),
         ],
@@ -2089,7 +2098,7 @@ class _ResourceRow extends StatelessWidget {
   final bool selected;
   final bool multiSelectMode;
   final bool compact;
-  final List<TagPlacement> tags;
+  final List<EffectiveTagView> tags;
   final TagTagController controller;
   final VoidCallback onTap;
   final ValueChanged<bool> onSelectionChanged;
@@ -2174,12 +2183,15 @@ class _ResourceRow extends StatelessWidget {
                     children: tags
                         .take(3)
                         .map(
-                          (placement) => _PlacementChip(
-                            label: controller.tagForPlacement(placement).name,
-                            colorValue: controller
-                                .tagForPlacement(placement)
-                                .colorValue,
-                            tooltip: controller.pathOf(placement.id),
+                          (effective) => _PlacementChip(
+                            label: effective.tag.name,
+                            colorValue: effective.tag.colorValue,
+                            inheritedOnly:
+                                effective.isInherited && !effective.isDirect,
+                            tooltip: _effectiveTagTooltip(
+                              controller,
+                              effective,
+                            ),
                           ),
                         )
                         .toList(),
@@ -2386,16 +2398,36 @@ class _HierarchyResourceRow extends StatelessWidget {
   }
 }
 
+String _effectiveTagTooltip(
+  TagTagController controller,
+  EffectiveTagView effective,
+) {
+  final lines = <String>[];
+  if (effective.directPlacements.isNotEmpty) {
+    final paths = effective.directPlacements
+        .map((placement) => controller.pathOf(placement.id))
+        .toSet()
+        .join('；');
+    lines.add('直接标注：$paths');
+  }
+  for (final source in effective.inheritedSources) {
+    lines.add('继承自：${source.name}（${source.path}）');
+  }
+  return lines.join('\n');
+}
+
 class _PlacementChip extends StatelessWidget {
   const _PlacementChip({
     required this.label,
     required this.colorValue,
     required this.tooltip,
+    required this.inheritedOnly,
   });
 
   final String label;
   final int colorValue;
   final String tooltip;
+  final bool inheritedOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -2412,7 +2444,14 @@ class _PlacementChip extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            _TagDot(colorValue: colorValue, size: 8),
+            if (inheritedOnly)
+              Icon(
+                Icons.subdirectory_arrow_right,
+                size: 13,
+                color: Color(colorValue),
+              )
+            else
+              _TagDot(colorValue: colorValue, size: 8),
             const SizedBox(width: 4),
             Flexible(
               child: Text(
@@ -2482,6 +2521,8 @@ class _QuickTagDialog extends StatefulWidget {
 
 class _QuickTagDialogState extends State<_QuickTagDialog> {
   String query = '';
+  String? selectedPlacementId;
+  bool inheritChildren = false;
 
   @override
   Widget build(BuildContext context) {
@@ -2509,23 +2550,45 @@ class _QuickTagDialogState extends State<_QuickTagDialog> {
             ),
             const SizedBox(height: 12),
             Expanded(
-              child: ListView.separated(
-                itemCount: placements.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final placement = placements[index];
-                  final tag = widget.controller.tagForPlacement(placement);
-                  return ListTile(
-                    dense: true,
-                    leading: _TagDot(colorValue: tag.colorValue),
-                    title: Text(tag.name),
-                    subtitle: Text(widget.controller.pathOf(placement.id)),
-                    trailing: const Icon(Icons.add),
-                    onTap: () => Navigator.pop(context, placement.id),
-                  );
+              child: RadioGroup<String>(
+                groupValue: selectedPlacementId,
+                onChanged: (value) {
+                  if (value != null) {
+                    _selectPlacement(
+                      widget.controller.state.placementById(value),
+                    );
+                  }
                 },
+                child: ListView.separated(
+                  itemCount: placements.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final placement = placements[index];
+                    final tag = widget.controller.tagForPlacement(placement);
+                    return ListTile(
+                      selected: selectedPlacementId == placement.id,
+                      dense: true,
+                      leading: _TagDot(colorValue: tag.colorValue),
+                      title: Text(tag.name),
+                      subtitle: Text(widget.controller.pathOf(placement.id)),
+                      trailing: Radio<String>(value: placement.id),
+                      onTap: () => _selectPlacement(placement),
+                    );
+                  },
+                ),
               ),
             ),
+            if (widget.controller.selectedFolderForInheritance != null &&
+                selectedPlacementId != null) ...[
+              const Divider(height: 1),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: inheritChildren,
+                onChanged: (value) => setState(() => inheritChildren = value),
+                title: const Text('子项继承'),
+                subtitle: const Text('当前和未来位于此文件夹下的受管资源获得该有效标签'),
+              ),
+            ],
           ],
         ),
       ),
@@ -2534,9 +2597,44 @@ class _QuickTagDialogState extends State<_QuickTagDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
+        FilledButton(
+          onPressed: selectedPlacementId == null
+              ? null
+              : () => Navigator.pop(
+                  context,
+                  _QuickTagDraft(
+                    placementId: selectedPlacementId!,
+                    inheritChildren:
+                        widget.controller.selectedFolderForInheritance == null
+                        ? null
+                        : inheritChildren,
+                  ),
+                ),
+          child: const Text('添加标签'),
+        ),
       ],
     );
   }
+
+  void _selectPlacement(TagPlacement placement) {
+    final folder = widget.controller.selectedFolderForInheritance;
+    setState(() {
+      selectedPlacementId = placement.id;
+      inheritChildren =
+          folder != null &&
+          widget.controller.folderInheritsTag(folder.id, placement.tagId);
+    });
+  }
+}
+
+class _QuickTagDraft {
+  const _QuickTagDraft({
+    required this.placementId,
+    required this.inheritChildren,
+  });
+
+  final String placementId;
+  final bool? inheritChildren;
 }
 
 class _TagDialog extends StatefulWidget {

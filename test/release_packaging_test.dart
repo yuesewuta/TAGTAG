@@ -5,6 +5,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yaml/yaml.dart';
 
 void main() {
+  test('project version stays on a valid pre-1.0 SemVer baseline', () async {
+    final pubspec =
+        loadYaml(await File('pubspec.yaml').readAsString()) as YamlMap;
+    final version = pubspec['version'] as String;
+    final match = RegExp(r'^(\d+)\.(\d+)\.(\d+)\+(\d+)$').firstMatch(version);
+
+    expect(match, isNotNull);
+    expect(match!.group(1), '0');
+  });
+
   test(
     'release workflow produces and validates both Windows packages',
     () async {
@@ -25,6 +35,11 @@ void main() {
         byName,
         contains('Verify installer install, upgrade, and uninstall'),
       );
+
+      final versionScript = byName['Resolve build version']!['run'] as String;
+      expect(versionScript, contains('vMAJOR.MINOR.PATCH'));
+      expect(versionScript, contains(r'$buildName -ne $projectVersion'));
+      expect(versionScript, contains('does not match pubspec.yaml version'));
 
       final installerBuild = byName['Build Windows installer']!;
       expect(installerBuild['id'], 'installer');
@@ -95,10 +110,7 @@ void main() {
     expect(installer, isNot(contains('[UninstallDelete]')));
     expect(installer, contains('tagtag_explorer_bridge.exe'));
     expect(installer, contains('Software\\Classes\\*\\shell\\TAGTAG'));
-    expect(
-      installer,
-      contains('Software\\Classes\\Directory\\shell\\TAGTAG'),
-    );
+    expect(installer, contains('Software\\Classes\\Directory\\shell\\TAGTAG'));
   });
 }
 

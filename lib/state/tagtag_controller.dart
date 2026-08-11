@@ -11,6 +11,21 @@ import '../storage/managed_library.dart';
 
 enum ResourceView { all, hierarchy, inbox, recent, search }
 
+class EffectiveTagView {
+  const EffectiveTagView({
+    required this.tag,
+    required this.directPlacements,
+    required this.inheritedSources,
+  });
+
+  final TagDefinition tag;
+  final List<TagPlacement> directPlacements;
+  final List<TagResource> inheritedSources;
+
+  bool get isDirect => directPlacements.isNotEmpty;
+  bool get isInherited => inheritedSources.isNotEmpty;
+}
+
 class TagTagController extends ChangeNotifier {
   TagTagController({required this.store, this.library, this.recycleBin});
 
@@ -122,7 +137,10 @@ class TagTagController extends ChangeNotifier {
           (resource) =>
               query.isEmpty ||
               resource.name.toLowerCase().contains(query) ||
-              resource.path.toLowerCase().contains(query),
+              resource.path.toLowerCase().contains(query) ||
+              effectiveTagsForResource(resource.id).any(
+                (effective) => effective.tag.name.toLowerCase().contains(query),
+              ),
         )
         .toList();
     resources.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
@@ -188,23 +206,109 @@ class TagTagController extends ChangeNotifier {
         .toList();
   }
 
+  List<EffectiveTagView> effectiveTagsForResource(String resourceId) {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return const [];
+    }
+    final resourceMatches = _state.resources.where(
+      (resource) => resource.id == resourceId,
+    );
+    if (resourceMatches.isEmpty) {
+      return const [];
+    }
+    final resource = resourceMatches.single;
+    final memberResourceIds = _state.resourceIdsForSpace(spaceId);
+    if (!memberResourceIds.contains(resourceId)) {
+      return const [];
+    }
+    final placementsById = {
+      for (final placement in placementsInActiveSpace) placement.id: placement,
+    };
+    final tagsById = {
+      for (final tag in _state.tags)
+        if (tag.spaceId == spaceId) tag.id: tag,
+    };
+    final directByTagId = <String, List<TagPlacement>>{};
+    for (final assignment in _state.assignments) {
+      if (assignment.resourceId != resourceId) {
+        continue;
+      }
+      final placement = placementsById[assignment.placementId];
+      if (placement != null) {
+        directByTagId.putIfAbsent(placement.tagId, () => []).add(placement);
+      }
+    }
+    final directTagKeys = <String>{
+      for (final assignment in _state.assignments)
+        if (placementsById[assignment.placementId] case final placement?)
+          '${assignment.resourceId}|${placement.tagId}',
+    };
+    final resourcesById = {for (final item in _state.resources) item.id: item};
+    final inheritedByTagId = <String, List<TagResource>>{};
+    for (final rule in _state.folderTagInheritances) {
+      if (!tagsById.containsKey(rule.tagId) ||
+          !memberResourceIds.contains(rule.folderResourceId) ||
+          !directTagKeys.contains('${rule.folderResourceId}|${rule.tagId}')) {
+        continue;
+      }
+      final source = resourcesById[rule.folderResourceId];
+      if (source == null ||
+          source.kind != ResourceKind.folder ||
+          path.equals(source.path, resource.path) ||
+          !path.isWithin(source.path, resource.path)) {
+        continue;
+      }
+      inheritedByTagId.putIfAbsent(rule.tagId, () => []).add(source);
+    }
+    final tagIds = {...directByTagId.keys, ...inheritedByTagId.keys};
+    final result = [
+      for (final tagId in tagIds)
+        if (tagsById[tagId] case final tag?)
+          EffectiveTagView(
+            tag: tag,
+            directPlacements: directByTagId[tagId] ?? const [],
+            inheritedSources: inheritedByTagId[tagId] ?? const [],
+          ),
+    ];
+    result.sort(
+      (first, second) =>
+          first.tag.name.toLowerCase().compareTo(second.tag.name.toLowerCase()),
+    );
+    return result;
+  }
+
+  TagResource? get selectedFolderForInheritance {
+    if (selectedResourceIds.length != 1) {
+      return null;
+    }
+    final resourceId = selectedResourceIds.single;
+    final matches = _state.resources.where(
+      (resource) =>
+          resource.id == resourceId && resource.kind == ResourceKind.folder,
+    );
+    return matches.isEmpty ? null : matches.single;
+  }
+
+  bool folderInheritsTag(String folderResourceId, String tagId) =>
+      _state.folderTagInheritances.any(
+        (rule) =>
+            rule.folderResourceId == folderResourceId && rule.tagId == tagId,
+      );
+
   List<TagResource> resourcesForPlacement(TagPlacement placement) {
     final spaceId = activeSpaceId;
     if (spaceId == null || placement.spaceId != spaceId) {
       return const [];
     }
-    final placementIds = placementsInActiveSpace
-        .where((item) => item.tagId == placement.tagId)
-        .map((item) => item.id)
-        .toSet();
-    final assignedResourceIds = _state.assignments
-        .where((assignment) => placementIds.contains(assignment.placementId))
-        .map((assignment) => assignment.resourceId)
-        .toSet();
     final memberResourceIds = _state.resourceIdsForSpace(spaceId);
     final resources = _state.resources
         .where((resource) => memberResourceIds.contains(resource.id))
-        .where((resource) => assignedResourceIds.contains(resource.id))
+        .where(
+          (resource) => effectiveTagsForResource(
+            resource.id,
+          ).any((effective) => effective.tag.id == placement.tagId),
+        )
         .toList();
     resources.sort(
       (first, second) =>
@@ -498,6 +602,9 @@ class TagTagController extends ChangeNotifier {
                   !removedPlacementIds.contains(assignment.placementId),
             )
             .toList(),
+        folderTagInheritances: _state.folderTagInheritances
+            .where((rule) => rule.tagId != tagId)
+            .toList(),
       ),
     );
   }
@@ -711,6 +818,10 @@ class TagTagController extends ChangeNotifier {
         for (final assignment in _state.assignments)
           if (assignment.resourceId == resourceId) assignment.toJson(),
       ],
+      'folderTagInheritances': [
+        for (final rule in _state.folderTagInheritances)
+          if (rule.folderResourceId == resourceId) rule.toJson(),
+      ],
       'usageEvents': [
         for (final event in _state.usageEvents)
           if (event.resourceId == resourceId) event.toJson(),
@@ -750,6 +861,7 @@ class TagTagController extends ChangeNotifier {
     final validPlacementIds = _state.placements
         .map((placement) => placement.id)
         .toSet();
+    final validTagIds = _state.tags.map((tag) => tag.id).toSet();
     final memberships = (snapshot['memberships'] as List<dynamic>? ?? const [])
         .map(
           (item) =>
@@ -774,6 +886,18 @@ class TagTagController extends ChangeNotifier {
               (event.placementId == null ||
                   validPlacementIds.contains(event.placementId)),
         );
+    final folderTagInheritances =
+        (snapshot['folderTagInheritances'] as List<dynamic>? ?? const [])
+            .map(
+              (item) => FolderTagInheritance.fromJson(
+                Map<String, dynamic>.from(item as Map),
+              ),
+            )
+            .where(
+              (rule) =>
+                  rule.folderResourceId == operation.resourceId &&
+                  validTagIds.contains(rule.tagId),
+            );
     await _update(
       _state.copyWith(
         memberships: [
@@ -787,6 +911,12 @@ class TagTagController extends ChangeNotifier {
             (assignment) => assignment.resourceId != operation.resourceId,
           ),
           ...assignments,
+        ],
+        folderTagInheritances: [
+          ..._state.folderTagInheritances.where(
+            (rule) => rule.folderResourceId != operation.resourceId,
+          ),
+          ...folderTagInheritances,
         ],
         usageEvents: [
           ..._state.usageEvents.where(
@@ -862,16 +992,24 @@ class TagTagController extends ChangeNotifier {
     return operation;
   }
 
-  Future<void> assignPlacementToSelection(String placementId) async {
+  Future<void> assignPlacementToSelection(
+    String placementId, {
+    bool? inheritChildren,
+  }) async {
     final spaceId = activeSpaceId;
     if (spaceId == null || selectedResourceIds.isEmpty) {
       return;
+    }
+    final placement = _state.placementById(placementId);
+    if (placement.spaceId != spaceId) {
+      throw StateError('只能使用当前标签空间中的标签');
     }
     final existing = {
       for (final assignment in _state.assignments)
         '${assignment.resourceId}|${assignment.placementId}',
     };
     final assignments = [..._state.assignments];
+    var folderTagInheritances = [..._state.folderTagInheritances];
     final events = [..._state.usageEvents];
     for (final resourceId in selectedResourceIds) {
       if (existing.add('$resourceId|$placementId')) {
@@ -895,8 +1033,35 @@ class TagTagController extends ChangeNotifier {
         ),
       );
     }
+    if (inheritChildren != null) {
+      final folder = selectedFolderForInheritance;
+      if (folder == null) {
+        throw StateError('子项继承一次只能设置一个文件夹');
+      }
+      folderTagInheritances = folderTagInheritances
+          .where(
+            (rule) =>
+                rule.folderResourceId != folder.id ||
+                rule.tagId != placement.tagId,
+          )
+          .toList();
+      if (inheritChildren) {
+        folderTagInheritances.add(
+          FolderTagInheritance(
+            id: newId('inheritance'),
+            folderResourceId: folder.id,
+            tagId: placement.tagId,
+            createdAt: DateTime.now(),
+          ),
+        );
+      }
+    }
     await _update(
-      _state.copyWith(assignments: assignments, usageEvents: events),
+      _state.copyWith(
+        assignments: assignments,
+        folderTagInheritances: folderTagInheritances,
+        usageEvents: events,
+      ),
     );
   }
 
@@ -910,6 +1075,11 @@ class TagTagController extends ChangeNotifier {
             .where(
               (assignment) =>
                   !selectedResourceIds.contains(assignment.resourceId),
+            )
+            .toList(),
+        folderTagInheritances: _state.folderTagInheritances
+            .where(
+              (rule) => !selectedResourceIds.contains(rule.folderResourceId),
             )
             .toList(),
       ),
@@ -1000,18 +1170,10 @@ class TagTagController extends ChangeNotifier {
       if (spaceId == null) {
         return <String>{};
       }
-      final placementIds = _state
-          .placementsForSpace(spaceId)
-          .map((placement) => placement.id)
-          .toSet();
-      final taggedResourceIds = _state.assignments
-          .where((assignment) => placementIds.contains(assignment.placementId))
-          .map((assignment) => assignment.resourceId)
-          .toSet();
       final memberResourceIds = _state.resourceIdsForSpace(spaceId);
       return _state.resources
           .where((resource) => memberResourceIds.contains(resource.id))
-          .where((resource) => !taggedResourceIds.contains(resource.id))
+          .where((resource) => effectiveTagsForResource(resource.id).isEmpty)
           .map((resource) => resource.id)
           .toSet();
     }
@@ -1025,12 +1187,19 @@ class TagTagController extends ChangeNotifier {
     final tagIds = placementIds
         .map((placementId) => _state.placementById(placementId).tagId)
         .toSet();
-    return _state.assignments
-        .where((assignment) {
-          final placement = _state.placementById(assignment.placementId);
-          return tagIds.contains(placement.tagId);
-        })
-        .map((assignment) => assignment.resourceId)
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return <String>{};
+    }
+    final memberResourceIds = _state.resourceIdsForSpace(spaceId);
+    return _state.resources
+        .where((resource) => memberResourceIds.contains(resource.id))
+        .where(
+          (resource) => effectiveTagsForResource(
+            resource.id,
+          ).any((effective) => tagIds.contains(effective.tag.id)),
+        )
+        .map((resource) => resource.id)
         .toSet();
   }
 
@@ -1049,6 +1218,9 @@ class TagTagController extends ChangeNotifier {
     final managedResources = await managedLibrary.listResources();
     final resources = managedResources.map(_tagResourceFromManaged).toList();
     final resourceIds = resources.map((resource) => resource.id).toSet();
+    final resourcesById = {
+      for (final resource in resources) resource.id: resource,
+    };
     final memberships = _state.memberships
         .where((membership) => resourceIds.contains(membership.resourceId))
         .toList();
@@ -1074,6 +1246,14 @@ class TagTagController extends ChangeNotifier {
       memberships: memberships,
       assignments: _state.assignments
           .where((assignment) => resourceIds.contains(assignment.resourceId))
+          .toList(),
+      folderTagInheritances: _state.folderTagInheritances
+          .where(
+            (rule) =>
+                resourcesById[rule.folderResourceId]?.kind ==
+                    ResourceKind.folder &&
+                _state.tags.any((tag) => tag.id == rule.tagId),
+          )
           .toList(),
       usageEvents: _state.usageEvents
           .where(

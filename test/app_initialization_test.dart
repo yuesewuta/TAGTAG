@@ -148,6 +148,64 @@ void main() {
     },
   );
 
+  testWidgets('folder Quick Tag exposes its current inheritance rule', (
+    tester,
+  ) async {
+    const channel = MethodChannel('tagtag/windows_quick_tag');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'isRegistered');
+      return true;
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('tagtag-folder-quick-tag-'),
+    ))!;
+    addTearDown(() => sandbox.delete(recursive: true));
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await tester.runAsync(() => store.save(AppState.demo()));
+    final controller = TagTagController(store: store);
+    await tester.runAsync(controller.load);
+    controller.selectResource('resource-folder');
+    await tester.runAsync(
+      () => controller.assignPlacementToSelection(
+        'place-project',
+        inheritChildren: true,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TagTagHome(
+          controller: controller,
+          fileActions: WindowsFileActions(),
+          quickTagHotkey: WindowsQuickTagHotkey(channel: channel),
+          onRestoreGlobalBackup: (_, _) async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await messenger.handlePlatformMessage(
+      channel.name,
+      channel.codec.encodeMethodCall(const MethodCall('activated')),
+      (_) {},
+    );
+    await _pumpUntilFound(tester, find.text('为 1 项添加标签'));
+
+    await tester.tap(find.text('项目').first);
+    await tester.pump();
+
+    expect(find.text('子项继承'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+    expect(find.text('添加标签'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Explorer Quick Tag activation opens the import-and-tag dialog', (
     tester,
   ) async {

@@ -190,6 +190,35 @@ class TagAssignment {
   );
 }
 
+class FolderTagInheritance {
+  const FolderTagInheritance({
+    required this.id,
+    required this.folderResourceId,
+    required this.tagId,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String folderResourceId;
+  final String tagId;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'folderResourceId': folderResourceId,
+    'tagId': tagId,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory FolderTagInheritance.fromJson(Map<String, dynamic> json) =>
+      FolderTagInheritance(
+        id: json['id'] as String,
+        folderResourceId: json['folderResourceId'] as String,
+        tagId: json['tagId'] as String,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+      );
+}
+
 class UsageEvent {
   const UsageEvent({
     required this.id,
@@ -234,6 +263,7 @@ class AppState {
     required this.resources,
     required this.memberships,
     required this.assignments,
+    required this.folderTagInheritances,
     required this.usageEvents,
     required this.activeSpaceId,
   });
@@ -244,6 +274,7 @@ class AppState {
   final List<TagResource> resources;
   final List<SpaceMembership> memberships;
   final List<TagAssignment> assignments;
+  final List<FolderTagInheritance> folderTagInheritances;
   final List<UsageEvent> usageEvents;
   final String? activeSpaceId;
 
@@ -254,6 +285,7 @@ class AppState {
     resources: [],
     memberships: [],
     assignments: [],
+    folderTagInheritances: [],
     usageEvents: [],
     activeSpaceId: null,
   );
@@ -464,6 +496,7 @@ class AppState {
           createdAt: now,
         ),
       ],
+      folderTagInheritances: const [],
       usageEvents: [
         UsageEvent(
           id: 'usage-architecture',
@@ -493,6 +526,7 @@ class AppState {
     List<TagResource>? resources,
     List<SpaceMembership>? memberships,
     List<TagAssignment>? assignments,
+    List<FolderTagInheritance>? folderTagInheritances,
     List<UsageEvent>? usageEvents,
     String? activeSpaceId,
     bool clearActiveSpace = false,
@@ -503,6 +537,7 @@ class AppState {
     resources: resources ?? this.resources,
     memberships: memberships ?? this.memberships,
     assignments: assignments ?? this.assignments,
+    folderTagInheritances: folderTagInheritances ?? this.folderTagInheritances,
     usageEvents: usageEvents ?? this.usageEvents,
     activeSpaceId: clearActiveSpace
         ? null
@@ -613,7 +648,7 @@ class AppState {
   }
 
   Map<String, dynamic> toJson() => {
-    'version': 2,
+    'version': 3,
     'activeSpaceId': activeSpaceId,
     'spaces': spaces.map((item) => item.toJson()).toList(),
     'tags': tags.map((item) => item.toJson()).toList(),
@@ -621,6 +656,9 @@ class AppState {
     'resources': resources.map((item) => item.toJson()).toList(),
     'memberships': memberships.map((item) => item.toJson()).toList(),
     'assignments': assignments.map((item) => item.toJson()).toList(),
+    'folderTagInheritances': folderTagInheritances
+        .map((item) => item.toJson())
+        .toList(),
     'usageEvents': usageEvents.map((item) => item.toJson()).toList(),
   };
 
@@ -660,6 +698,13 @@ class AppState {
       assignments: (json['assignments'] as List<dynamic>)
           .map((item) => TagAssignment.fromJson(item as Map<String, dynamic>))
           .toList(),
+      folderTagInheritances:
+          (json['folderTagInheritances'] as List<dynamic>? ?? const [])
+              .map(
+                (item) =>
+                    FolderTagInheritance.fromJson(item as Map<String, dynamic>),
+              )
+              .toList(),
       usageEvents: (json['usageEvents'] as List<dynamic>)
           .map((item) => UsageEvent.fromJson(item as Map<String, dynamic>))
           .toList(),

@@ -7,6 +7,7 @@ TAGTAG 是面向 Windows 的本地文件与文件夹标签管理器。受管资�
 - 从选择器或主窗口拖放导入文件和文件夹，默认复制，也可明确选择移动。
 - 在同一个导入窗口选择存储根内目标目录和零个或多个标签；零标签资源进入待整理区。
 - 支持标签空间、无限层级、独立同名标签，以及同一唯一标签实体的多路径复用。
+- 文件夹标签可显式启用动态子项继承；子项不产生直接标签副本，有效标签会标明继承来源。
 - 同一受管资源可以属于多个标签空间，空间成员关系与标签关系相互独立。
 - 支持名称/受管路径搜索、最近使用、常用标签、待整理和直接标签检查。
 - 双击使用 Windows 默认应用打开资源，资源菜单可在 Explorer 中定位。
@@ -42,7 +43,9 @@ Windows 桌面插件构建需要符号链接支持。建议在 Windows 设置中
 
 ## 发布
 
-`.github/workflows/release.yml` 支持手动构建。推送形如 `v1.0.0` 的 Git 标签时，工作流会运行分析与测试、构建 Windows Release，并同时发布 `TAGTAG-<tag>-windows-x64-portable.zip` 和 `TAGTAG-<tag>-windows-x64-setup.exe`。安装器按当前用户安装，不要求管理员权限；卸载不会删除用户选择的存储根或 `%APPDATA%/TAGTAG` 数据。
+`.github/workflows/release.yml` 支持手动构建。推送形如 `v0.7.0` 的 Git 标签时，标签版本必须与 `pubspec.yaml` 一致；工作流会运行分析与测试、构建 Windows Release，并同时发布 `TAGTAG-<tag>-windows-x64-portable.zip` 和 `TAGTAG-<tag>-windows-x64-setup.exe`。安装器按当前用户安装，不要求管理员权限；卸载不会删除用户选择的存储根或 `%APPDATA%/TAGTAG` 数据。
+
+版本遵循 `MAJOR.MINOR.PATCH`：不兼容 API 或架构变更递增 `MAJOR`，向下兼容的新功能递增 `MINOR`，只修复缺陷且不增加功能时递增 `PATCH`。项目在明确稳定前保持 `0.y.z`；已经发布的历史标签和 Release 不重写。当前功能版本为 `v0.7.0`，其后纯修复版本从 `v0.7.1` 开始，下一项向下兼容功能发布为 `v0.8.0`。
 
 ## 核心语义
 

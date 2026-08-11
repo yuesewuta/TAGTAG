@@ -37,10 +37,22 @@ jobs:
         id: version
         shell: pwsh
         run: |
+          $pubspec = Get-Content -LiteralPath "pubspec.yaml" -Raw
+          $versionMatch = [regex]::Match(
+            $pubspec,
+            "(?m)^version:\s*(\d+\.\d+\.\d+)(?:\+\d+)?\s*$"
+          )
+          if (-not $versionMatch.Success) {
+            throw "pubspec.yaml must declare MAJOR.MINOR.PATCH with an optional build suffix."
+          }
+          $projectVersion = $versionMatch.Groups[1].Value
           if ("${{ github.ref_type }}" -eq "tag") {
             $buildName = "${{ github.ref_name }}".TrimStart("v")
             if ($buildName -notmatch "^\d+\.\d+\.\d+$") {
               throw "Release tags must use vMAJOR.MINOR.PATCH."
+            }
+            if ($buildName -ne $projectVersion) {
+              throw "Release tag $buildName does not match pubspec.yaml version $projectVersion."
             }
             $label = "${{ github.ref_name }}"
           } else {
