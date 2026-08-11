@@ -11,6 +11,12 @@ import '../storage/managed_library.dart';
 
 enum ResourceView { all, hierarchy, inbox, recent, search }
 
+enum SearchKindFilter { all, file, folder }
+
+enum SearchTagCondition { none, and, or, not }
+
+enum InboxScope { currentSpace, global }
+
 class EffectiveTagView {
   const EffectiveTagView({
     required this.tag,
@@ -38,6 +44,17 @@ class TagTagController extends ChangeNotifier {
 
   String? activePlacementId;
   String searchTerm = '';
+  SearchKindFilter searchKind = SearchKindFilter.all;
+  int? searchMinimumSizeBytes;
+  int? searchMaximumSizeBytes;
+  DateTime? searchCreatedFrom;
+  DateTime? searchCreatedTo;
+  DateTime? searchModifiedFrom;
+  DateTime? searchModifiedTo;
+  final Set<String> searchAndTagIds = <String>{};
+  final Set<String> searchOrTagIds = <String>{};
+  final Set<String> searchNotTagIds = <String>{};
+  InboxScope inboxScope = InboxScope.currentSpace;
   bool includeDescendants = true;
   ResourceView activeView = ResourceView.all;
 
@@ -45,6 +62,17 @@ class TagTagController extends ChangeNotifier {
   UserPreferences get preferences => _preferences;
   bool get showRecent => activeView == ResourceView.recent;
   bool get showInbox => activeView == ResourceView.inbox;
+  bool get hasAdvancedSearchFilters =>
+      searchKind != SearchKindFilter.all ||
+      searchMinimumSizeBytes != null ||
+      searchMaximumSizeBytes != null ||
+      searchCreatedFrom != null ||
+      searchCreatedTo != null ||
+      searchModifiedFrom != null ||
+      searchModifiedTo != null ||
+      searchAndTagIds.isNotEmpty ||
+      searchOrTagIds.isNotEmpty ||
+      searchNotTagIds.isNotEmpty;
   Directory? get storageRoot => library?.root;
   String? get activeSpaceId => _state.activeSpaceId;
   TagSpace? get activeSpace {
@@ -127,8 +155,12 @@ class TagTagController extends ChangeNotifier {
         : '';
     final matchingIds = _matchingResourceIds();
     final memberResourceIds = _state.resourceIdsForSpace(spaceId);
+    final resourceScopeIds =
+        activeView == ResourceView.inbox && inboxScope == InboxScope.global
+        ? _state.resources.map((resource) => resource.id).toSet()
+        : memberResourceIds;
     final resources = _state.resources
-        .where((resource) => memberResourceIds.contains(resource.id))
+        .where((resource) => resourceScopeIds.contains(resource.id))
         .where(
           (resource) =>
               matchingIds == null || matchingIds.contains(resource.id),
@@ -138,9 +170,14 @@ class TagTagController extends ChangeNotifier {
               query.isEmpty ||
               resource.name.toLowerCase().contains(query) ||
               resource.path.toLowerCase().contains(query) ||
-              effectiveTagsForResource(resource.id).any(
+              effectiveTagsForResourceInSpace(resource.id, spaceId).any(
                 (effective) => effective.tag.name.toLowerCase().contains(query),
               ),
+        )
+        .where(
+          (resource) =>
+              activeView != ResourceView.search ||
+              _matchesAdvancedSearch(resource, spaceId),
         )
         .toList();
     resources.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
@@ -211,6 +248,13 @@ class TagTagController extends ChangeNotifier {
     if (spaceId == null) {
       return const [];
     }
+    return effectiveTagsForResourceInSpace(resourceId, spaceId);
+  }
+
+  List<EffectiveTagView> effectiveTagsForResourceInSpace(
+    String resourceId,
+    String spaceId,
+  ) {
     final resourceMatches = _state.resources.where(
       (resource) => resource.id == resourceId,
     );
@@ -223,7 +267,8 @@ class TagTagController extends ChangeNotifier {
       return const [];
     }
     final placementsById = {
-      for (final placement in placementsInActiveSpace) placement.id: placement,
+      for (final placement in _state.placementsForSpace(spaceId))
+        placement.id: placement,
     };
     final tagsById = {
       for (final tag in _state.tags)
@@ -368,6 +413,80 @@ class TagTagController extends ChangeNotifier {
 
   void setSearchTerm(String value) {
     searchTerm = value;
+    notifyListeners();
+  }
+
+  void setSearchKind(SearchKindFilter value) {
+    searchKind = value;
+    notifyListeners();
+  }
+
+  void setSearchSizeRange({int? minimumBytes, int? maximumBytes}) {
+    searchMinimumSizeBytes = minimumBytes;
+    searchMaximumSizeBytes = maximumBytes;
+    notifyListeners();
+  }
+
+  void setSearchCreatedRange({DateTime? from, DateTime? to}) {
+    searchCreatedFrom = from;
+    searchCreatedTo = to;
+    notifyListeners();
+  }
+
+  void setSearchModifiedRange({DateTime? from, DateTime? to}) {
+    searchModifiedFrom = from;
+    searchModifiedTo = to;
+    notifyListeners();
+  }
+
+  SearchTagCondition searchConditionForTag(String tagId) {
+    if (searchAndTagIds.contains(tagId)) {
+      return SearchTagCondition.and;
+    }
+    if (searchOrTagIds.contains(tagId)) {
+      return SearchTagCondition.or;
+    }
+    if (searchNotTagIds.contains(tagId)) {
+      return SearchTagCondition.not;
+    }
+    return SearchTagCondition.none;
+  }
+
+  void setSearchTagCondition(String tagId, SearchTagCondition condition) {
+    searchAndTagIds.remove(tagId);
+    searchOrTagIds.remove(tagId);
+    searchNotTagIds.remove(tagId);
+    switch (condition) {
+      case SearchTagCondition.and:
+        searchAndTagIds.add(tagId);
+      case SearchTagCondition.or:
+        searchOrTagIds.add(tagId);
+      case SearchTagCondition.not:
+        searchNotTagIds.add(tagId);
+      case SearchTagCondition.none:
+        break;
+    }
+    notifyListeners();
+  }
+
+  void clearSearchFilters() {
+    searchTerm = '';
+    searchKind = SearchKindFilter.all;
+    searchMinimumSizeBytes = null;
+    searchMaximumSizeBytes = null;
+    searchCreatedFrom = null;
+    searchCreatedTo = null;
+    searchModifiedFrom = null;
+    searchModifiedTo = null;
+    searchAndTagIds.clear();
+    searchOrTagIds.clear();
+    searchNotTagIds.clear();
+    notifyListeners();
+  }
+
+  void setInboxScope(InboxScope value) {
+    inboxScope = value;
+    selectedResourceIds.clear();
     notifyListeners();
   }
 
@@ -1170,10 +1289,26 @@ class TagTagController extends ChangeNotifier {
       if (spaceId == null) {
         return <String>{};
       }
+      if (inboxScope == InboxScope.global) {
+        return _state.resources
+            .where(
+              (resource) => !_state.spaces.any(
+                (space) => effectiveTagsForResourceInSpace(
+                  resource.id,
+                  space.id,
+                ).isNotEmpty,
+              ),
+            )
+            .map((resource) => resource.id)
+            .toSet();
+      }
       final memberResourceIds = _state.resourceIdsForSpace(spaceId);
       return _state.resources
           .where((resource) => memberResourceIds.contains(resource.id))
-          .where((resource) => effectiveTagsForResource(resource.id).isEmpty)
+          .where(
+            (resource) =>
+                effectiveTagsForResourceInSpace(resource.id, spaceId).isEmpty,
+          )
           .map((resource) => resource.id)
           .toSet();
     }
@@ -1207,6 +1342,63 @@ class TagTagController extends ChangeNotifier {
     _state = next;
     notifyListeners();
     await _persistTagDomainMetadata();
+  }
+
+  bool _matchesAdvancedSearch(TagResource resource, String spaceId) {
+    if (searchKind == SearchKindFilter.file &&
+        resource.kind != ResourceKind.file) {
+      return false;
+    }
+    if (searchKind == SearchKindFilter.folder &&
+        resource.kind != ResourceKind.folder) {
+      return false;
+    }
+    final size = resource.sizeBytes;
+    if (searchMinimumSizeBytes case final minimum?) {
+      if (size == null || size < minimum) {
+        return false;
+      }
+    }
+    if (searchMaximumSizeBytes case final maximum?) {
+      if (size == null || size > maximum) {
+        return false;
+      }
+    }
+    final createdAt = resource.createdAt;
+    if (searchCreatedFrom case final from?) {
+      if (createdAt == null || createdAt.isBefore(from)) {
+        return false;
+      }
+    }
+    if (searchCreatedTo case final to?) {
+      if (createdAt == null || createdAt.isAfter(to)) {
+        return false;
+      }
+    }
+    if (searchModifiedFrom case final from?) {
+      if (resource.modifiedAt.isBefore(from)) {
+        return false;
+      }
+    }
+    if (searchModifiedTo case final to?) {
+      if (resource.modifiedAt.isAfter(to)) {
+        return false;
+      }
+    }
+    final tagIds = effectiveTagsForResourceInSpace(
+      resource.id,
+      spaceId,
+    ).map((effective) => effective.tag.id).toSet();
+    if (!tagIds.containsAll(searchAndTagIds)) {
+      return false;
+    }
+    if (searchOrTagIds.isNotEmpty && !searchOrTagIds.any(tagIds.contains)) {
+      return false;
+    }
+    if (searchNotTagIds.any(tagIds.contains)) {
+      return false;
+    }
+    return true;
   }
 
   Future<void> _syncManagedResources() async {
@@ -1311,5 +1503,7 @@ class TagTagController extends ChangeNotifier {
         ? ResourceKind.file
         : ResourceKind.folder,
     modifiedAt: managed.modifiedAt,
+    sizeBytes: managed.sizeBytes,
+    createdAt: managed.createdAt,
   );
 }

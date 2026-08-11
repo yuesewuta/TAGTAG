@@ -206,6 +206,56 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('search filters and global inbox controls stay in their pages', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(960, 720);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final sandbox = (await tester.runAsync(
+      () => Directory.systemTemp.createTemp('tagtag-search-ui-'),
+    ))!;
+    addTearDown(() => sandbox.delete(recursive: true));
+    final store = LocalStore(
+      baseDirectory: Directory('${sandbox.path}/config'),
+    );
+    await tester.runAsync(() => store.save(AppState.demo()));
+    final controller = TagTagController(store: store);
+    await tester.runAsync(controller.load);
+    controller.showSearchResources();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TagTagHome(
+          controller: controller,
+          fileActions: WindowsFileActions(),
+          onRestoreGlobalBackup: (_, _) async {},
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('高级筛选'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('最小大小'), findsOneWidget);
+    expect(find.text('创建起始'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilterChip, '项目'));
+    await tester.pump();
+    expect(
+      controller.searchConditionForTag('tag-project'),
+      SearchTagCondition.and,
+    );
+
+    controller.showInboxResources();
+    await tester.pump();
+    await tester.tap(find.text('全局'));
+    await tester.pump();
+    expect(controller.inboxScope, InboxScope.global);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Explorer Quick Tag activation opens the import-and-tag dialog', (
     tester,
   ) async {

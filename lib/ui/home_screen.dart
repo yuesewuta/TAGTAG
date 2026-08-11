@@ -39,6 +39,8 @@ class TagTagHome extends StatefulWidget {
 
 class _TagTagHomeState extends State<TagTagHome> {
   late final TextEditingController _searchController;
+  late final TextEditingController _minimumSizeController;
+  late final TextEditingController _maximumSizeController;
   late final FocusNode _searchFocusNode;
   late final WindowsQuickTagHotkey _quickTagHotkey;
   late final WindowsFloatingDropTarget _floatingDropTarget;
@@ -57,6 +59,8 @@ class _TagTagHomeState extends State<TagTagHome> {
   void initState() {
     super.initState();
     _searchController = TextEditingController(text: controller.searchTerm);
+    _minimumSizeController = TextEditingController();
+    _maximumSizeController = TextEditingController();
     _searchFocusNode = FocusNode();
     _quickTagHotkey = widget.quickTagHotkey ?? WindowsQuickTagHotkey();
     _floatingDropTarget =
@@ -82,6 +86,8 @@ class _TagTagHomeState extends State<TagTagHome> {
   @override
   void dispose() {
     _searchController.dispose();
+    _minimumSizeController.dispose();
+    _maximumSizeController.dispose();
     _searchFocusNode.dispose();
     _consistencyTimer?.cancel();
     unawaited(_quickTagHotkey.dispose());
@@ -370,6 +376,25 @@ class _TagTagHomeState extends State<TagTagHome> {
                   icon: const Icon(Icons.sell_outlined),
                 ),
               ],
+              if (controller.activeView == ResourceView.inbox)
+                SegmentedButton<InboxScope>(
+                  segments: const [
+                    ButtonSegment(
+                      value: InboxScope.currentSpace,
+                      label: Text('当前空间'),
+                      icon: Icon(Icons.layers_outlined, size: 17),
+                    ),
+                    ButtonSegment(
+                      value: InboxScope.global,
+                      label: Text('全局'),
+                      icon: Icon(Icons.public, size: 17),
+                    ),
+                  ],
+                  selected: {controller.inboxScope},
+                  onSelectionChanged: (selection) =>
+                      controller.setInboxScope(selection.single),
+                  showSelectedIcon: false,
+                ),
               IconButton(
                 tooltip: _multiSelectMode ? '退出多选' : '多选资源',
                 onPressed: _toggleMultiSelectMode,
@@ -382,39 +407,21 @@ class _TagTagHomeState extends State<TagTagHome> {
             ],
           ),
         ),
-        if (isSearch)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 12),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              onChanged: controller.setSearchTerm,
-              decoration: InputDecoration(
-                isDense: true,
-                prefixIcon: const Icon(Icons.search, size: 20),
-                hintText: '搜索名称、路径或标签',
-                suffixIcon: _searchController.text.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: '清除搜索',
-                        icon: const Icon(Icons.close, size: 18),
-                        onPressed: () {
-                          _searchController.clear();
-                          controller.setSearchTerm('');
-                        },
-                      ),
-              ),
-            ),
-          ),
+        if (isSearch) _buildSearchControls(),
         _ResourceHeader(compact: compact, multiSelectMode: _multiSelectMode),
         const Divider(height: 1),
         Expanded(
           child: resources.isEmpty
               ? _EmptyResourceState(
-                  hasFilter: isSearch && controller.searchTerm.isNotEmpty,
+                  hasFilter:
+                      isSearch &&
+                      (controller.searchTerm.isNotEmpty ||
+                          controller.hasAdvancedSearchFilters),
                   onClear: () {
                     _searchController.clear();
-                    controller.setSearchTerm('');
+                    _minimumSizeController.clear();
+                    _maximumSizeController.clear();
+                    controller.clearSearchFilters();
                   },
                 )
               : ListView.separated(
@@ -426,6 +433,266 @@ class _TagTagHomeState extends State<TagTagHome> {
         ),
       ],
     );
+  }
+
+  Widget _buildSearchControls() {
+    final tags =
+        controller.state.tags
+            .where((tag) => tag.spaceId == controller.activeSpaceId)
+            .toList()
+          ..sort(
+            (first, second) =>
+                first.name.toLowerCase().compareTo(second.name.toLowerCase()),
+          );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+      child: Column(
+        children: [
+          TextField(
+            controller: _searchController,
+            focusNode: _searchFocusNode,
+            onChanged: controller.setSearchTerm,
+            decoration: InputDecoration(
+              isDense: true,
+              prefixIcon: const Icon(Icons.search, size: 20),
+              hintText: '搜索名称、路径或标签',
+              suffixIcon: _searchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: '清除关键词',
+                      icon: const Icon(Icons.close, size: 18),
+                      onPressed: () {
+                        _searchController.clear();
+                        controller.setSearchTerm('');
+                      },
+                    ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(bottom: 8),
+            dense: true,
+            leading: const Icon(Icons.tune, size: 20),
+            title: const Text('高级筛选'),
+            trailing: controller.hasAdvancedSearchFilters
+                ? IconButton(
+                    tooltip: '清除全部筛选',
+                    onPressed: () {
+                      _searchController.clear();
+                      _minimumSizeController.clear();
+                      _maximumSizeController.clear();
+                      controller.clearSearchFilters();
+                    },
+                    icon: const Icon(Icons.filter_alt_off_outlined, size: 19),
+                  )
+                : null,
+            children: [
+              Align(
+                alignment: Alignment.centerLeft,
+                child: SegmentedButton<SearchKindFilter>(
+                  segments: const [
+                    ButtonSegment(
+                      value: SearchKindFilter.all,
+                      label: Text('全部'),
+                    ),
+                    ButtonSegment(
+                      value: SearchKindFilter.file,
+                      label: Text('文件'),
+                      icon: Icon(Icons.insert_drive_file_outlined, size: 17),
+                    ),
+                    ButtonSegment(
+                      value: SearchKindFilter.folder,
+                      label: Text('文件夹'),
+                      icon: Icon(Icons.folder_outlined, size: 17),
+                    ),
+                  ],
+                  selected: {controller.searchKind},
+                  onSelectionChanged: (selection) =>
+                      controller.setSearchKind(selection.single),
+                  showSelectedIcon: false,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _minimumSizeController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onChanged: (_) => _updateSearchSizeRange(),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: '最小大小',
+                        suffixText: 'MB',
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      controller: _maximumSizeController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      onChanged: (_) => _updateSearchSizeRange(),
+                      decoration: const InputDecoration(
+                        isDense: true,
+                        labelText: '最大大小',
+                        suffixText: 'MB',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _buildDateFilter(
+                      label: '创建起始',
+                      value: controller.searchCreatedFrom,
+                      onChanged: (value) => controller.setSearchCreatedRange(
+                        from: value,
+                        to: controller.searchCreatedTo,
+                      ),
+                    ),
+                    _buildDateFilter(
+                      label: '创建截止',
+                      value: controller.searchCreatedTo,
+                      endOfDay: true,
+                      onChanged: (value) => controller.setSearchCreatedRange(
+                        from: controller.searchCreatedFrom,
+                        to: value,
+                      ),
+                    ),
+                    _buildDateFilter(
+                      label: '修改起始',
+                      value: controller.searchModifiedFrom,
+                      onChanged: (value) => controller.setSearchModifiedRange(
+                        from: value,
+                        to: controller.searchModifiedTo,
+                      ),
+                    ),
+                    _buildDateFilter(
+                      label: '修改截止',
+                      value: controller.searchModifiedTo,
+                      endOfDay: true,
+                      onChanged: (value) => controller.setSearchModifiedRange(
+                        from: controller.searchModifiedFrom,
+                        to: value,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (tags.isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: tags.map(_buildSearchTagChip).toList(),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchTagChip(TagDefinition tag) {
+    final condition = controller.searchConditionForTag(tag.id);
+    final modeLabel = switch (condition) {
+      SearchTagCondition.none => null,
+      SearchTagCondition.and => 'AND',
+      SearchTagCondition.or => 'OR',
+      SearchTagCondition.not => 'NOT',
+    };
+    final nextCondition = switch (condition) {
+      SearchTagCondition.none => SearchTagCondition.and,
+      SearchTagCondition.and => SearchTagCondition.or,
+      SearchTagCondition.or => SearchTagCondition.not,
+      SearchTagCondition.not => SearchTagCondition.none,
+    };
+    return Tooltip(
+      message: '标签实体 ${tag.id}',
+      child: FilterChip(
+        avatar: Icon(
+          condition == SearchTagCondition.not
+              ? Icons.remove_circle_outline
+              : Icons.sell_outlined,
+          size: 16,
+          color: Color(tag.colorValue),
+        ),
+        label: Text(modeLabel == null ? tag.name : '${tag.name} · $modeLabel'),
+        selected: condition != SearchTagCondition.none,
+        onSelected: (_) =>
+            controller.setSearchTagCondition(tag.id, nextCondition),
+      ),
+    );
+  }
+
+  Widget _buildDateFilter({
+    required String label,
+    required DateTime? value,
+    required ValueChanged<DateTime?> onChanged,
+    bool endOfDay = false,
+  }) {
+    final dateLabel = value == null
+        ? label
+        : '$label ${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+    return InputChip(
+      avatar: const Icon(Icons.calendar_today_outlined, size: 16),
+      label: Text(dateLabel),
+      onPressed: () async {
+        final selected = await showDatePicker(
+          context: context,
+          initialDate: value?.toLocal() ?? DateTime.now(),
+          firstDate: DateTime(1970),
+          lastDate: DateTime(2100),
+        );
+        if (selected == null) {
+          return;
+        }
+        final localValue = endOfDay
+            ? DateTime(
+                selected.year,
+                selected.month,
+                selected.day,
+                23,
+                59,
+                59,
+                999,
+              )
+            : DateTime(selected.year, selected.month, selected.day);
+        onChanged(localValue.toUtc());
+      },
+      onDeleted: value == null ? null : () => onChanged(null),
+    );
+  }
+
+  void _updateSearchSizeRange() {
+    controller.setSearchSizeRange(
+      minimumBytes: _megabytesToBytes(_minimumSizeController.text),
+      maximumBytes: _megabytesToBytes(_maximumSizeController.text),
+    );
+  }
+
+  int? _megabytesToBytes(String value) {
+    final megabytes = double.tryParse(value.trim());
+    if (megabytes == null || megabytes < 0) {
+      return null;
+    }
+    return (megabytes * 1024 * 1024).round();
   }
 
   Widget _buildResourceRow(TagResource resource, bool compact) {

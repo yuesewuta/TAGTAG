@@ -112,6 +112,8 @@ class TagResource {
     required this.path,
     required this.kind,
     required this.modifiedAt,
+    this.sizeBytes,
+    this.createdAt,
   });
 
   final String id;
@@ -119,6 +121,8 @@ class TagResource {
   final String path;
   final ResourceKind kind;
   final DateTime modifiedAt;
+  final int? sizeBytes;
+  final DateTime? createdAt;
 
   Map<String, dynamic> toJson() => {
     'id': id,
@@ -126,6 +130,8 @@ class TagResource {
     'path': path,
     'kind': kind.name,
     'modifiedAt': modifiedAt.toIso8601String(),
+    'sizeBytes': sizeBytes,
+    'createdAt': createdAt?.toIso8601String(),
   };
 
   factory TagResource.fromJson(Map<String, dynamic> json) => TagResource(
@@ -134,6 +140,11 @@ class TagResource {
     path: json['path'] as String,
     kind: ResourceKind.values.byName(json['kind'] as String),
     modifiedAt: DateTime.parse(json['modifiedAt'] as String),
+    sizeBytes: json['sizeBytes'] as int?,
+    createdAt: switch (json['createdAt']) {
+      final String value => DateTime.parse(value),
+      _ => null,
+    },
   );
 }
 
