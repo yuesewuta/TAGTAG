@@ -57,6 +57,22 @@ class ManagedResource {
   final DateTime createdAt;
 }
 
+class PackagedResourceImport {
+  const PackagedResourceImport({
+    required this.id,
+    required this.source,
+    required this.targetRelativePath,
+    required this.kind,
+    required this.createdAt,
+  });
+
+  final String id;
+  final FileSystemEntity source;
+  final String targetRelativePath;
+  final ManagedResourceKind kind;
+  final DateTime createdAt;
+}
+
 class ManagedOperation {
   const ManagedOperation({
     required this.id,
@@ -360,6 +376,207 @@ class ManagedLibrary {
         await _deleteEntity(destinationPath, sourceType);
       }
       rethrow;
+    }
+  }
+
+  Future<List<ManagedResource>> importPackagedResources(
+    List<PackagedResourceImport> imports,
+  ) async {
+    if (imports.isEmpty) {
+      return const [];
+    }
+    final existing = await listResources();
+    final existingIds = existing.map((resource) => resource.id).toSet();
+    final importIds = <String>{};
+    final normalizedImports = <PackagedResourceImport>[];
+    for (final item in imports) {
+      if (item.id.trim().isEmpty ||
+          existingIds.contains(item.id) ||
+          !importIds.add(item.id)) {
+        throw StateError('空间包包含重复或已存在的资源 ID：${item.id}');
+      }
+      final relativePath = _normalizeRelativePath(item.targetRelativePath);
+      final expectedType = item.kind == ManagedResourceKind.file
+          ? FileSystemEntityType.file
+          : FileSystemEntityType.directory;
+      if (await FileSystemEntity.type(item.source.absolute.path) !=
+          expectedType) {
+        throw FileSystemException('空间包资源内容类型不一致', item.source.path);
+      }
+      normalizedImports.add(
+        PackagedResourceImport(
+          id: item.id,
+          source: item.source,
+          targetRelativePath: relativePath,
+          kind: item.kind,
+          createdAt: item.createdAt,
+        ),
+      );
+    }
+    final candidatePaths = normalizedImports
+        .map((item) => item.targetRelativePath)
+        .toList();
+    for (var index = 0; index < candidatePaths.length; index++) {
+      final candidate = candidatePaths[index];
+      if (existing.any(
+            (resource) =>
+                resource.relativePath == candidate ||
+                (resource.kind == ManagedResourceKind.folder &&
+                    path.posix.isWithin(resource.relativePath, candidate)) ||
+                (normalizedImports[index].kind == ManagedResourceKind.folder &&
+                    path.posix.isWithin(candidate, resource.relativePath)),
+          ) ||
+          candidatePaths.indexed.any(
+            (other) =>
+                other.$1 != index &&
+                (other.$2 == candidate ||
+                    (normalizedImports[other.$1].kind ==
+                            ManagedResourceKind.folder &&
+                        path.posix.isWithin(other.$2, candidate)) ||
+                    (normalizedImports[index].kind ==
+                            ManagedResourceKind.folder &&
+                        path.posix.isWithin(candidate, other.$2))),
+          )) {
+        throw FileSystemException('空间包导入目标与已有受管范围冲突', candidate);
+      }
+      final destination = _absolutePath(candidate);
+      if (await FileSystemEntity.type(destination) !=
+          FileSystemEntityType.notFound) {
+        throw FileSystemException('空间包导入目标已存在，TAGTAG 不会覆盖', destination);
+      }
+    }
+
+    final copied = <({String path, FileSystemEntityType type})>[];
+    final resources = <ManagedResource>[];
+    var transactionActive = false;
+    try {
+      for (final item in normalizedImports) {
+        final destination = _absolutePath(item.targetRelativePath);
+        final type = item.kind == ManagedResourceKind.file
+            ? FileSystemEntityType.file
+            : FileSystemEntityType.directory;
+        await Directory(path.dirname(destination)).create(recursive: true);
+        await _copyEntity(item.source.absolute.path, destination, type);
+        copied.add((path: destination, type: type));
+        final stat = await FileStat.stat(destination);
+        resources.add(
+          ManagedResource(
+            id: item.id,
+            name: path.posix.basename(item.targetRelativePath),
+            relativePath: item.targetRelativePath,
+            kind: item.kind,
+            status: ManagedResourceStatus.managed,
+            originalPath: null,
+            sizeBytes: item.kind == ManagedResourceKind.file ? stat.size : null,
+            modifiedAt: stat.modified.toUtc(),
+            createdAt: item.createdAt.toUtc(),
+          ),
+        );
+      }
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      for (final resource in resources) {
+        _database.execute(
+          '''
+            INSERT INTO resources(
+              id, name, relative_path, kind, status, original_path,
+              size_bytes, modified_at, created_at
+            ) VALUES (?, ?, ?, ?, 'managed', NULL, ?, ?, ?)
+          ''',
+          [
+            resource.id,
+            resource.name,
+            resource.relativePath,
+            resource.kind.name,
+            resource.sizeBytes,
+            resource.modifiedAt.toIso8601String(),
+            resource.createdAt.toIso8601String(),
+          ],
+        );
+        _database.execute(
+          '''
+            INSERT INTO operations(
+              id, type, resource_id, source_path,
+              destination_relative_path, created_at, undone_at
+            ) VALUES (?, 'import_copy', ?, ?, ?, ?, NULL)
+          ''',
+          [
+            newId('operation'),
+            resource.id,
+            'space-package',
+            resource.relativePath,
+            DateTime.now().toUtc().toIso8601String(),
+          ],
+        );
+      }
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return resources;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      for (final item in copied.reversed) {
+        if (await FileSystemEntity.type(item.path) !=
+            FileSystemEntityType.notFound) {
+          await _deleteEntity(item.path, item.type);
+        }
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> rollbackPackagedResources(Set<String> resourceIds) async {
+    if (resourceIds.isEmpty) {
+      return;
+    }
+    final resources = (await listResources())
+        .where((resource) => resourceIds.contains(resource.id))
+        .toList();
+    final removed = <({ManagedResource resource, String stagingPath})>[];
+    final staging = await Directory.systemTemp.createTemp('tagtag-rollback-');
+    var transactionActive = false;
+    try {
+      for (final resource in resources) {
+        final sourcePath = _absolutePath(resource.relativePath);
+        final type = resource.kind == ManagedResourceKind.file
+            ? FileSystemEntityType.file
+            : FileSystemEntityType.directory;
+        final stagingPath = path.join(staging.path, resource.id);
+        await _copyEntity(sourcePath, stagingPath, type);
+        await _deleteEntity(sourcePath, type);
+        removed.add((resource: resource, stagingPath: stagingPath));
+      }
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      for (final resource in resources) {
+        _database.execute('DELETE FROM operations WHERE resource_id = ?', [
+          resource.id,
+        ]);
+        _database.execute('DELETE FROM resources WHERE id = ?', [resource.id]);
+      }
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      for (final item in removed) {
+        final destination = _absolutePath(item.resource.relativePath);
+        final type = item.resource.kind == ManagedResourceKind.file
+            ? FileSystemEntityType.file
+            : FileSystemEntityType.directory;
+        if (await FileSystemEntity.type(destination) ==
+            FileSystemEntityType.notFound) {
+          await Directory(path.dirname(destination)).create(recursive: true);
+          await _copyEntity(item.stagingPath, destination, type);
+        }
+      }
+      rethrow;
+    } finally {
+      if (await staging.exists()) {
+        await staging.delete(recursive: true);
+      }
     }
   }
 

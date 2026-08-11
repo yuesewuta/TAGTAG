@@ -1,6 +1,6 @@
 # 02 - Space template workflow
 
-State: claimed
+State: resolved
 Type: task
 
 Implement tag-structure-only template export/import without resource bytes.

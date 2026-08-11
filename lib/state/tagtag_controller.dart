@@ -7,6 +7,7 @@ import 'package:path/path.dart' as path;
 
 import '../data/local_store.dart';
 import '../models/tag_models.dart';
+import '../services/space_portability.dart';
 import '../storage/managed_library.dart';
 
 enum ResourceView { all, hierarchy, inbox, recent, search }
@@ -1562,6 +1563,70 @@ class TagTagController extends ChangeNotifier {
         ).convert(_preferences.toJson()),
       },
     );
+  }
+
+  Future<File> exportActiveSpacePackage(File destination) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    return SpacePortability.exportPackage(
+      state: _state,
+      spaceId: _requireActiveSpace(),
+      library: managedLibrary,
+      destination: destination,
+    );
+  }
+
+  Future<File> exportActiveSpaceTemplate(File destination) {
+    return SpacePortability.exportTemplate(
+      state: _state,
+      spaceId: _requireActiveSpace(),
+      destination: destination,
+    );
+  }
+
+  Future<SpaceArchiveSummary> inspectSpaceArchive(File archiveFile) =>
+      SpacePortability.inspect(archiveFile);
+
+  Future<SpaceArchiveSummary> importSpaceArchive({
+    required File archiveFile,
+    required SpaceArchiveKind expectedKind,
+    String targetDirectory = '',
+  }) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final inspected = await SpacePortability.inspect(archiveFile);
+    if (inspected.kind != expectedKind) {
+      throw FormatException(
+        expectedKind == SpaceArchiveKind.package ? '所选文件不是空间导出包' : '所选文件不是空间模板',
+      );
+    }
+    SpaceImportMutation? mutation;
+    try {
+      mutation = await SpacePortability.importArchive(
+        archiveFile: archiveFile,
+        currentState: _state,
+        library: managedLibrary,
+        targetDirectory: targetDirectory,
+      );
+      await _persistTagDomainMetadata(state: mutation.state);
+      _state = mutation.state;
+      activePlacementId = null;
+      selectedResourceIds.clear();
+      activeView = ResourceView.all;
+      notifyListeners();
+      return mutation.summary;
+    } catch (_) {
+      if (mutation != null) {
+        await managedLibrary.rollbackPackagedResources(
+          mutation.importedResourceIds,
+        );
+      }
+      rethrow;
+    }
   }
 
   Future<BackupValidationResult> validateGlobalBackup(

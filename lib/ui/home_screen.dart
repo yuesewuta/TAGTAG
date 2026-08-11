@@ -11,6 +11,7 @@ import '../models/tag_models.dart';
 import '../platform/windows_file_actions.dart';
 import '../platform/windows_floating_drop_target.dart';
 import '../platform/windows_quick_tag_hotkey.dart';
+import '../services/space_portability.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
 
@@ -50,6 +51,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   bool _navigationExpanded = false;
   bool _multiSelectMode = false;
   bool _restoringBackup = false;
+  bool _portabilityBusy = false;
   List<ConsistencyFinding> _consistencyFindings = const [];
   Timer? _consistencyTimer;
 
@@ -241,19 +243,27 @@ class _TagTagHomeState extends State<TagTagHome> {
             ),
           ),
         PopupMenuButton<_BackupCommand>(
-          tooltip: '备份与恢复',
-          enabled: !_restoringBackup,
+          tooltip: '备份与空间迁移',
+          enabled: !_restoringBackup && !_portabilityBusy,
           onSelected: (command) {
             switch (command) {
-              case _BackupCommand.create:
+              case _BackupCommand.createGlobalBackup:
                 unawaited(_createBackup());
-              case _BackupCommand.restore:
+              case _BackupCommand.restoreGlobalBackup:
                 unawaited(_restoreGlobalBackup());
+              case _BackupCommand.exportSpacePackage:
+                unawaited(_exportSpaceArchive(SpaceArchiveKind.package));
+              case _BackupCommand.importSpacePackage:
+                unawaited(_importSpaceArchive(SpaceArchiveKind.package));
+              case _BackupCommand.exportSpaceTemplate:
+                unawaited(_exportSpaceArchive(SpaceArchiveKind.template));
+              case _BackupCommand.importSpaceTemplate:
+                unawaited(_importSpaceArchive(SpaceArchiveKind.template));
             }
           },
           itemBuilder: (context) => const [
             PopupMenuItem(
-              value: _BackupCommand.create,
+              value: _BackupCommand.createGlobalBackup,
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.backup_outlined),
@@ -261,15 +271,48 @@ class _TagTagHomeState extends State<TagTagHome> {
               ),
             ),
             PopupMenuItem(
-              value: _BackupCommand.restore,
+              value: _BackupCommand.restoreGlobalBackup,
               child: ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(Icons.restore_outlined),
                 title: Text('从完整备份恢复'),
               ),
             ),
+            PopupMenuDivider(),
+            PopupMenuItem(
+              value: _BackupCommand.exportSpacePackage,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.file_upload_outlined),
+                title: Text('导出当前空间包'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BackupCommand.importSpacePackage,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.file_download_outlined),
+                title: Text('导入空间包'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BackupCommand.exportSpaceTemplate,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.account_tree_outlined),
+                title: Text('导出当前空间模板'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BackupCommand.importSpaceTemplate,
+              child: ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.post_add_outlined),
+                title: Text('从空间模板新建'),
+              ),
+            ),
           ],
-          icon: _restoringBackup
+          icon: _restoringBackup || _portabilityBusy
               ? const SizedBox.square(
                   dimension: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
@@ -1422,6 +1465,154 @@ class _TagTagHomeState extends State<TagTagHome> {
       if (mounted) {
         setState(() => _restoringBackup = false);
         _showMessage('恢复失败：$error', error: true);
+      }
+    }
+  }
+
+  Future<void> _exportSpaceArchive(SpaceArchiveKind kind) async {
+    final activeSpace = controller.activeSpace;
+    if (activeSpace == null) {
+      _showMessage('请先创建或选择标签空间。', error: true);
+      return;
+    }
+    final isPackage = kind == SpaceArchiveKind.package;
+    final timestamp = DateTime.now()
+        .toUtc()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .split('.')
+        .first;
+    final location = await getSaveLocation(
+      suggestedName: isPackage
+          ? 'tagtag-space-package-$timestamp.zip'
+          : 'tagtag-space-template-$timestamp.zip',
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: isPackage ? 'TAGTAG 空间包' : 'TAGTAG 空间模板',
+          extensions: const ['zip'],
+        ),
+      ],
+      confirmButtonText: isPackage ? '导出空间包' : '导出空间模板',
+      canCreateDirectories: true,
+    );
+    if (location == null || !mounted) {
+      return;
+    }
+    setState(() => _portabilityBusy = true);
+    try {
+      final destination = File(location.path);
+      final exported = isPackage
+          ? await controller.exportActiveSpacePackage(destination)
+          : await controller.exportActiveSpaceTemplate(destination);
+      if (mounted) {
+        _showMessage(
+          isPackage ? '空间包已导出到：${exported.path}' : '空间模板已导出到：${exported.path}',
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage(
+          isPackage ? '空间包导出失败：$error' : '空间模板导出失败：$error',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _portabilityBusy = false);
+      }
+    }
+  }
+
+  Future<void> _importSpaceArchive(SpaceArchiveKind expectedKind) async {
+    final isPackage = expectedKind == SpaceArchiveKind.package;
+    final selected = await openFile(
+      acceptedTypeGroups: [
+        XTypeGroup(
+          label: isPackage ? 'TAGTAG 空间包' : 'TAGTAG 空间模板',
+          extensions: const ['zip'],
+        ),
+      ],
+      confirmButtonText: isPackage ? '选择空间包' : '选择空间模板',
+    );
+    if (selected == null || !mounted) {
+      return;
+    }
+    SpaceArchiveSummary summary;
+    try {
+      summary = await controller.inspectSpaceArchive(File(selected.path));
+      if (summary.kind != expectedKind) {
+        throw FormatException(isPackage ? '所选文件不是空间导出包' : '所选文件不是空间模板');
+      }
+    } catch (error) {
+      _showMessage('归档校验失败：$error', error: true);
+      return;
+    }
+    var targetDirectory = '';
+    if (isPackage) {
+      final root = controller.storageRoot;
+      if (root == null) {
+        _showMessage('存储根尚未初始化。', error: true);
+        return;
+      }
+      final selectedTarget = await getDirectoryPath(
+        initialDirectory: root.path,
+        confirmButtonText: '选择空间包资源存储位置',
+        canCreateDirectories: true,
+      );
+      if (selectedTarget == null || !mounted) {
+        return;
+      }
+      final normalizedRoot = path.normalize(root.path);
+      final normalizedTarget = path.normalize(selectedTarget);
+      if (!path.equals(normalizedRoot, normalizedTarget) &&
+          !path.isWithin(normalizedRoot, normalizedTarget)) {
+        _showMessage('空间包资源必须导入到存储根目录内。', error: true);
+        return;
+      }
+      targetDirectory = path.equals(normalizedRoot, normalizedTarget)
+          ? ''
+          : path
+                .relative(normalizedTarget, from: normalizedRoot)
+                .replaceAll('\\', '/');
+    }
+    final confirmed = await _confirm(
+      title: isPackage ? '导入空间包？' : '从模板新建空间？',
+      message: isPackage
+          ? '来源空间：${summary.spaceName}\n'
+                '导出时间：${summary.createdAt.toLocal()}\n'
+                '标签数量：${summary.tagCount}\n'
+                '资源数量：${summary.resourceCount}\n'
+                '资源位置：存储根${targetDirectory.isEmpty ? '' : ' / $targetDirectory'}\n\n'
+                '将校验全部文件并保留稳定资源 ID；不会覆盖已有资源。'
+          : '模板空间：${summary.spaceName}\n'
+                '导出时间：${summary.createdAt.toLocal()}\n'
+                '标签数量：${summary.tagCount}\n\n'
+                '将创建新的空间、标签和层级身份，不导入资源或历史。',
+      actionLabel: isPackage ? '校验并导入' : '新建空间',
+    );
+    if (!confirmed || !mounted) {
+      return;
+    }
+    setState(() => _portabilityBusy = true);
+    try {
+      await controller.importSpaceArchive(
+        archiveFile: File(selected.path),
+        expectedKind: expectedKind,
+        targetDirectory: targetDirectory,
+      );
+      if (mounted) {
+        _showMessage(isPackage ? '空间包导入成功。' : '已从模板新建空间。');
+      }
+    } catch (error) {
+      if (mounted) {
+        _showMessage(
+          isPackage ? '空间包导入失败：$error' : '空间模板导入失败：$error',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _portabilityBusy = false);
       }
     }
   }
@@ -3856,7 +4047,14 @@ class _SettingsDraft {
 
 enum _ImportSourceKind { files, folder }
 
-enum _BackupCommand { create, restore }
+enum _BackupCommand {
+  createGlobalBackup,
+  restoreGlobalBackup,
+  exportSpacePackage,
+  importSpacePackage,
+  exportSpaceTemplate,
+  importSpaceTemplate,
+}
 
 class _ImportDraft {
   const _ImportDraft({

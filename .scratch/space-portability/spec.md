@@ -10,5 +10,5 @@ A space export package migrates one tag space with its metadata, history, resour
 - Different managed entities remain separate even when their bytes are identical.
 - Package import verifies paths, manifest entries, hashes, metadata references, and resource conflicts before committing.
 - Existing stable resource IDs are reused only when they identify the same existing managed resource; imported new entities preserve controlled IDs.
-- Templates include tag structure and configuration only, never resource records or bytes.
+- Templates include tag structure and configuration only, never resource records or bytes; every import creates fresh space, tag, and placement identities.
 - Space portability remains separate from global backup and restore.

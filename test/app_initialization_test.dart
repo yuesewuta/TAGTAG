@@ -77,10 +77,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('备份与恢复'));
+    await tester.tap(find.byTooltip('备份与空间迁移'));
     await tester.pumpAndSettle();
     expect(find.text('创建完整备份'), findsOneWidget);
     expect(find.text('从完整备份恢复'), findsOneWidget);
+    expect(find.text('导出当前空间包'), findsOneWidget);
+    expect(find.text('导入空间包'), findsOneWidget);
+    expect(find.text('导出当前空间模板'), findsOneWidget);
+    expect(find.text('从空间模板新建'), findsOneWidget);
     await tester.tapAt(const Offset(80, 160));
     await tester.pumpAndSettle();
 
