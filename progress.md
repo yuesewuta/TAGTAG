@@ -408,3 +408,5 @@
 - 2026-08-11：文件夹继承定向测试、Quick Tag widget 流程和全量测试通过；全量为 75/75，补强悬空规则防线后的关键测试为 12/12，静态分析零问题。
 - 2026-08-11：本次属于新增功能，按已确认 SemVer 将项目版本提升为 `0.7.0+1`，README 与需求审计同步更新当前状态。
 - 2026-08-11：发布前本地门禁完成：Dart 格式状态无 Git 额外差异，`flutter analyze --no-pub` 零问题，全量测试 76/76，Windows Release 构建成功，必需插件 DLL 打包检查为 GREEN。
+- 2026-08-11：提交 `bda107d feat: add folder tag inheritance` 已推送到 `main`，带说明标签 `v0.7.0` 已推送并触发 GitHub Actions run `31490106702`。
+- 2026-08-11：远端分析、76 项测试、版本一致性校验、Windows 构建、便携包、安装器安装/升级/卸载及 Release 发布全部成功。正式资产为 `TAGTAG-v0.7.0-windows-x64-portable.zip`（13,882,589 字节）和 `TAGTAG-v0.7.0-windows-x64-setup.exe`（11,788,621 字节）。

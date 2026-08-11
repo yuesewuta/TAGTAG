@@ -13,7 +13,7 @@ TAGTAG releases use `MAJOR.MINOR.PATCH` and Git tags use `vMAJOR.MINOR.PATCH`.
 
 ## Current baseline
 
-The latest successful release is `v0.6.1`. Therefore:
+The latest successful release is `v0.7.0`. Therefore:
 
-- the next bug-fix-only release is `v0.6.2`;
-- the next backward-compatible feature release is `v0.7.0`.
+- the next bug-fix-only release is `v0.7.1`;
+- the next backward-compatible feature release is `v0.8.0`.
