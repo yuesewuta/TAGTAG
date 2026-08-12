@@ -7,37 +7,80 @@ class UserPreferences {
   const UserPreferences({
     this.moveImportsByDefault = false,
     this.floatingDropTargetEnabled = false,
+    this.closeToTray = true,
+    this.startupView = 'last',
+    this.appearanceTheme = 'light',
+    this.interfaceDensity = 'compact',
+    this.quickTagShortcut = 'Ctrl+Shift+T',
   });
 
   final bool moveImportsByDefault;
   final bool floatingDropTargetEnabled;
+  final bool closeToTray;
+  final String startupView;
+  final String appearanceTheme;
+  final String interfaceDensity;
+  final String quickTagShortcut;
 
   UserPreferences copyWith({
     bool? moveImportsByDefault,
     bool? floatingDropTargetEnabled,
+    bool? closeToTray,
+    String? startupView,
+    String? appearanceTheme,
+    String? interfaceDensity,
+    String? quickTagShortcut,
   }) => UserPreferences(
     moveImportsByDefault: moveImportsByDefault ?? this.moveImportsByDefault,
     floatingDropTargetEnabled:
         floatingDropTargetEnabled ?? this.floatingDropTargetEnabled,
+    closeToTray: closeToTray ?? this.closeToTray,
+    startupView: startupView ?? this.startupView,
+    appearanceTheme: appearanceTheme ?? this.appearanceTheme,
+    interfaceDensity: interfaceDensity ?? this.interfaceDensity,
+    quickTagShortcut: quickTagShortcut ?? this.quickTagShortcut,
   );
 
   Map<String, dynamic> toJson() => {
     'version': 1,
     'moveImportsByDefault': moveImportsByDefault,
     'floatingDropTargetEnabled': floatingDropTargetEnabled,
+    'closeToTray': closeToTray,
+    'startupView': startupView,
+    'appearanceTheme': appearanceTheme,
+    'interfaceDensity': interfaceDensity,
+    'quickTagShortcut': quickTagShortcut,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
     final floatingDropTargetEnabled = json['floatingDropTargetEnabled'];
+    final closeToTray = json['closeToTray'];
+    final startupView = json['startupView'];
+    final appearanceTheme = json['appearanceTheme'];
+    final interfaceDensity = json['interfaceDensity'];
+    final quickTagShortcut = json['quickTagShortcut'];
     if (json['version'] != 1 ||
         json['moveImportsByDefault'] is! bool ||
         (floatingDropTargetEnabled != null &&
-            floatingDropTargetEnabled is! bool)) {
+            floatingDropTargetEnabled is! bool) ||
+        (closeToTray != null && closeToTray is! bool) ||
+        (startupView != null || startupView is String) &&
+            !const {'last', 'all', 'inbox'}.contains(startupView) ||
+        (appearanceTheme != null || appearanceTheme is String) &&
+            !const {'light', 'dark'}.contains(appearanceTheme) ||
+        (interfaceDensity != null || interfaceDensity is String) &&
+            !const {'compact', 'comfortable'}.contains(interfaceDensity) ||
+        (quickTagShortcut != null && quickTagShortcut is! String)) {
       throw const FormatException('TAGTAG 设置文件无效');
     }
     return UserPreferences(
       moveImportsByDefault: json['moveImportsByDefault'] as bool,
       floatingDropTargetEnabled: floatingDropTargetEnabled as bool? ?? false,
+      closeToTray: closeToTray as bool? ?? true,
+      startupView: startupView as String? ?? 'last',
+      appearanceTheme: appearanceTheme as String? ?? 'light',
+      interfaceDensity: interfaceDensity as String? ?? 'compact',
+      quickTagShortcut: quickTagShortcut as String? ?? 'Ctrl+Shift+T',
     );
   }
 }

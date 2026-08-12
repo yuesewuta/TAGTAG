@@ -325,3 +325,130 @@
 - 2026-08-11：文件夹子项继承采用稳定的来源文件夹资源 ID 与标签实体 ID；有效标签按当前受管路径动态计算，目标移入/移出时自动获得/失去，不创建子项直接标注。
 - 2026-08-11：有效标签计算要求目标与来源均属于当前空间，且来源文件夹仍保有对应直接标签；悬空继承规则不会产生结果。
 - 2026-08-11：`v0.7.0` GitHub Actions run `31490106702` 全部成功；正式 Release 同时包含 Windows x64 便携 ZIP 与安装器，下一纯修复版本为 `v0.7.1`，下一功能版本为 `v0.8.0`。
+# UI Prototype Findings (2026-08-11)
+
+- The requested output is an isolated visual prototype, not a refactor of the current Flutter UI.
+- Required coverage: palette, tags/icons, primary layout and feature relationships, child-window hierarchy, settings purpose, motion, and window resizing behavior.
+- Repository instructions require reading `CONTEXT.md` and relevant ADRs before choosing terminology or architecture.
+- Existing root planning files contain the project's broader product history; this work is tracked as a separate appended workstream.
+- Canonical product model: one global storage root contains ordinary managed files and folders; tag spaces, memberships, tag entities, placements, assignments, inheritance, history, and consistency state are logical metadata over those resources.
+- Current main navigation is `全部资源 / 标签层级 / 待整理 / 最近 / 搜索 / 设置`; the top app bar also contains space switching, file import, folder import, new space, consistency warnings, backup/restore, and operation history.
+- Current child windows include Quick Tag, import-and-tag, create/edit tag, consistency handling, operation history, backup restore, and settings.
+- Current settings only expose the storage root, default copy/move import mode, and the floating drop target. The prototype should clarify settings as the home for persistent defaults, Windows integrations, storage health, backup, and appearance, while daily actions remain in the main workspace.
+- The main UI implementation is concentrated in a 3,425-line `home_screen.dart`, so the prototype should demonstrate clearer visual and task boundaries without changing production code.
+- ui-ux-pro-max correctly matched the product as `File Manager & Transfer` and `Productivity Tool`: flat minimalism, functional neutrals, file-type color coding, compact table rows, clear hierarchy, and restrained micro-interactions.
+- The first design-system aggregate misrouted to a newsletter/landing-page pattern; that pattern is rejected. The workspace override uses the verified file-manager/productivity results instead.
+- Motion guidance: 150-200ms hover feedback, 200-300ms spatial transitions, no overshoot on dense tables, and a reduced-motion fallback.
+- Responsive guidance: constraint-based layout, no horizontal page scroll, reduced columns at intermediate widths, stacked resource summaries at narrow widths, and real tests at 375/768/1024/1440.
+- The final workspace uses three coordinated layers: primary navigation, a scan-friendly resource surface, and a contextual inspector. Secondary operational state is moved into drawers instead of competing with the main toolbar.
+- Quick Tag is modeled as a focused one-decision utility; import remains a full task window because it combines source review, destination, tag assignment, and copy/move semantics.
+- Settings is limited to durable preferences and environment-level concerns: storage root, import defaults, Windows integration, floating drop target, backup, appearance, and motion. Consistency status and action history live in the library status center.
+- The visual system uses neutral surfaces, blue for primary action and focus, amber for folders, semantic green/red for health and failure, and multicolor tags with text/icon redundancy so color is never the sole signal.
+- Layout behavior is explicit: full navigation and inspector at wide widths; icon rail below 1024px; navigation drawer below 960px; reduced table columns below 680px. Quick Tag and import become single-column full-width flows on narrow windows.
+- Browser verification covered 1440, 1024, 768, 375, and 812x375 landscape viewports. Each measured `scrollWidth === clientWidth`; no horizontal page overflow was found.
+- Dark mode, reduced-motion rules, navigation drawer, search semantics, Quick Tag, import, settings, tag hierarchy, library health, operation log, keyboard dismissal, and responsive modal layouts were exercised in the prototype.
+- Final Playwright console state contained 0 errors and 0 warnings. `node --check prototypes/ui-refresh/app.js` and `git diff --check` both passed.
+
+# UI Prototype Iteration 2 Findings (2026-08-11)
+
+- The top command area's status and settings buttons duplicate the persistent bottom-left navigation controls. The prototype should keep only Import in the top action cluster.
+- The existing space switcher is visually presented as a dropdown but has no menu. The demo needs at least two selectable spaces while preserving the current content as non-persistent sample state.
+- The current tag hierarchy view renders a static tree. The requested interaction is a relationship editor: select a tag, choose its parent, apply the change, and immediately re-render the hierarchy with explicit feedback.
+- The library status trigger currently only opens the drawer. Both persistent status triggers should call one toggle function so a second activation closes it and `aria-expanded` remains accurate.
+- Windows integration already groups Explorer and floating-drop entry points. Global Quick Tag belongs in the same panel and needs a labeled shortcut recorder, editable key combination, validation feedback, and a restore-default action.
+- Concurrent Flutter and release work is present in the worktree; this iteration will edit only `prototypes/ui-refresh/` plus the root planning records.
+- ui-ux-pro-max validation reinforced keyboard-reachable controls, visible focus, inline validation, and an explicit stacking layer for the space dropdown. The implementation will use native buttons/selects and a recorder state with local error text.
+- Desktop browser verification confirms the header action cluster now exposes only Import. The space switcher opens an accessible listbox with `创作素材` and `团队共享`, and selecting the second option updates the visible space context without changing production data.
+- The bottom-left `资料库正常` control now reports `aria-expanded=true` while the drawer is visible and closes the same drawer on a second activation, satisfying the requested toggle behavior without a duplicate top trigger.
+- The tag hierarchy page now exposes the editable parent relationship alongside the tree. When `设计` is selected, its descendant tags are absent from the parent options, demonstrating cycle prevention before applying a change.
+- Dynamic hierarchy verification moved `品牌` from `设计` to `运营`. The tree re-rendered immediately, the selected parent remained `运营`, and both the inline success message and current path changed to `运营 / 品牌`.
+- Settings remains reachable from the persistent bottom-left entry after removing the duplicate header button, and the Windows integration category is keyboard/button accessible inside the settings dialog.
+- The shortcut recorder captured `Ctrl + Alt + Y`, replaced the displayed `Ctrl + Shift + T`, exited recording state, and retained a Restore Default action. The control is exposed as a button with a descriptive accessible name rather than an unlabeled key field.
+- Runtime verification confirmed the newly recorded `Ctrl + Alt + Y` combination opens Quick Tag after Settings is closed; the previous hard-coded shortcut condition is no longer the only active path.
+- At 375x812, the hierarchy page has no horizontal overflow (`scrollWidth === clientWidth === 375`). The result panel is intentionally hidden, while the full tree and relationship editor remain readable and vertically scrollable.
+- Visual review of the 1440 and 375 screenshots found no overlap or clipped labels. The relocated `品牌` row is visibly nested under `运营`, and the updated path and success message remain legible.
+- Narrow navigation inspection exposed that the visible library-health text did not produce a stable accessible name after responsive display changes. An explicit `aria-label` was added without changing the visual layout.
+- The same responsive behavior hid the settings-category text from the accessibility tree at 375px. Explicit labels were added to all five icon-only settings tabs before final verification.
+- Visual review of `iteration-2-settings-hotkey-375.png` confirms the shortcut recorder, registration state, restore action, Explorer integration, and save controls fit without overlap or truncation in the narrow full-height settings dialog.
+- Clean-state DOM verification at 375px reports one header action (`导入资源`), all five settings tabs with explicit names, and `scrollWidth === clientWidth === 375`. The browser console contains 0 errors and 0 warnings.
+- Landscape verification exposed that opening Settings from the mobile drawer did not clear `nav-open`; after the modal closed, the drawer intercepted the menu button. Settings and status-center entry handlers now close responsive navigation before opening their transient layer.
+- The landscape retry passed after the fix: selecting `标签层级` closed responsive navigation, the document measured `scrollWidth === clientWidth === 812`, and the 812x375 screenshot showed no overlap in the header, command bar, tree, or result pane.
+- Final validation passed after the landscape fix: browser console 0 errors / 0 warnings, JavaScript syntax check passed, HTTP preview returned 200, and Git whitespace validation passed.
+
+## Production UI Refresh Findings (2026-08-11)
+
+- The production refactor must adopt the prototype's visual hierarchy without restoring interactions that were rejected after earlier testing.
+- Confirmed production constraints are: no right inspector, no duplicate global search, direct resource actions, and the space switcher in the upper-right command area.
+- The wide desktop navigation target is 232px; compact desktop uses a stable 72px icon rail. Navigation expansion is a shell state, not a page-selection side effect.
+- The requested brand source `C:\Users\zcc\Desktop\LOGO.png` does not currently exist, including at the system-resolved Desktop path. Branding remains an explicit implementation blocker only for that asset.
+- Production resource and hierarchy surfaces must place `ExpansionTile`/`ListTile` on a real `Material` surface; an intermediate colored decoration hides ink states and triggers framework assertions.
+- The actual Release application at 1440x900 and 960x720 shows stable navigation, command, table, direct-action, and status-bar dimensions with no visible overlap or clipping.
+
+## Exact Prototype Parity Findings (2026-08-11)
+
+- The user's acceptance baseline is the complete HTML prototype, not a modernized version of the existing production layout.
+- The prior production pass is structurally insufficient because it retained the old two-column client shell and intentionally omitted prototype-defined inspector/query/status surfaces.
+- Exact parity requires auditing and reproducing the prototype's custom window bar, three-column desktop workspace, all transient layers, responsive state machine, appearance/density state, and keyboard/drag interactions before judging the Flutter implementation complete.
+- The authoritative prototype is substantial rather than a static mock: 1,612 lines of HTML, 2,394 lines of CSS, and 780 lines of JavaScript.
+- Node.js and `npx` are available locally, so the required Playwright CLI browser audit can run without installing a new runtime.
+## Prototype parity audit resumed (2026-08-11)
+
+- The latest user direction makes `prototypes/ui-refresh/index.html`, `styles.css`, and `app.js` the authoritative production UI and interaction specification; earlier production-only omissions are superseded.
+- Repository rules require local Markdown issue/spec tracking under `.scratch/` and canonical terminology from `CONTEXT.md`.
+- The active worktree already contains production-refresh and prototype-parity changes. All implementation work must preserve these files and avoid reverting unrelated edits.
+- The authoritative desktop workspace includes an open right inspector with resource identity, open/locate actions, editable effective tags, managed path, metadata, and tag-source sections.
+- The library-health control opens a two-tab status drawer: health shows consistency, storage, and backup; history shows logged operations with undo affordances.
+- Quick Tag is a focused dialog with tag search, selectable recent tags, child-inheritance toggle, and a selection-count-aware submit action.
+- Import is a larger two-column dialog containing source items, storage destination, tag selection, copy/move segmented control, a live summary, and mode-specific safety notice.
+- Settings is a five-category dialog (general, import, storage, Windows, appearance) with save/cancel semantics, shortcut recording, theme switching, and density switching.
+- The desktop chrome begins with a 32px prototype-owned title bar, followed by a three-column workspace: 232px persistent navigation, fluid main content, and a 300px inspector.
+- Persistent navigation contains brand identity, a listbox-style space switcher, grouped library/organization views, and bottom health/settings controls.
+- The main header contains breadcrumbs plus only the Import primary action; the content header separately owns the page title/subtitle and Quick Tag action.
+- The resource workspace combines an always-visible search command bar, explicit batch-selection state, a seven-column table, focusable/selectable rows, per-row open and more actions, and a search empty state.
+- Prototype sample rows intentionally exercise file/folder, inherited/direct/untagged, recent/inbox, and varied metadata states; Flutter needs equivalent state-driven rendering rather than a single uniform row.
+- Exact light tokens: primary `#285CC4`, hover `#1F4DA8`, primary soft `#EAF1FF`, text `#18202B`, muted `#5D6878`, canvas `#F5F7FA`, navigation `#EEF1F5`, surface `#FFFFFF`, border `#DDE2E9`, strong border `#CBD2DC`.
+- The prototype uses Segoe UI Variable/Segoe UI/Microsoft YaHei UI, 14px base text, 19px outline icons, 6px default radius, and a compact 54px row height; comfortable density changes rows to 64px.
+- Core fixed dimensions confirmed in CSS: 32px title bar, 232/1fr/300px desktop workspace, 52px main header, 40px navigation items, 38px space switcher, and 32px brand/dialog marks.
+- Dark mode is a complete semantic-token replacement rather than an overlay; production theme switching must update navigation, canvas, surfaces, borders, text, and semantic accents together.
+- Main interaction dimensions: 34px icon/command buttons, 84px content header, 46px command/filter strips, 34px sticky table header, 30px file icons, and 23px tag chips.
+- Table action icons intentionally remain hidden until row hover, keyboard focus, or selection; selected rows use the primary-soft background across every cell.
+- The inspector uses a subtle canvas, a white centered hero, bordered information sections, 48px resource icon, and right-aligned metadata values.
+- The tag workbench is a 34%/66% split with an independently scrollable tree, 36px indented tree rows, a fixed hierarchy editor at the tree bottom, placement chips, and compact resource results.
+- The status drawer is fixed to the right below the 32px title bar, 420px maximum width, and uses a 220ms horizontal transition; modal dialogs use an 8px radius and 200ms translate/scale entry.
+- Exact dialog sizes: Quick Tag 560px wide; Import 900x660px maximum; Settings 900x620px maximum; shared headers are 72px and footers 58px.
+- Import desktop layout is fluid content plus a fixed 250px summary; tags use a two-column grid. Settings desktop layout uses a 200px category rail plus scrollable content.
+- Drag import displays a full-window dashed primary overlay beneath a centered raised status panel; feedback uses a bottom-centered dark toast with 180ms motion.
+- Responsive matrix: below 1280px navigation becomes a 72px icon rail and inspector becomes a 320px right drawer; below 960px navigation becomes a 232px overlay drawer with backdrop; below 720px secondary table columns and tag results collapse and dialogs become full-width bottom sheets; below 440px chrome/table spacing compresses further.
+- At narrow widths, Import becomes one column, Settings becomes a 62px icon category rail, setting rows stack, and Quick Tag reserves a 430px scrollable body. Reduced-motion media disables meaningful transition duration.
+- View state changes update navigation selection, title/subtitle, resource/tag workbench visibility, Search filter strip, Inbox scope strip, and search focus; switching views clears the resource query.
+- Row click/Enter updates a single selected resource and inspector, while row checkboxes independently manage batch selection, indeterminate Select All, Quick Tag item count, and batch action availability.
+- Space switcher is keyboard navigable with Arrow Up/Down and Escape, closes on outside click, and propagates the selected space to title-bar, breadcrumbs, and dialogs.
+- Tag hierarchy prevents cycles by excluding the selected tag and descendants from parent choices; applying a change immediately rerenders the tree, path, feedback, and toast.
+- Quick Tag filters options live and updates its submit count. Import copy/move updates segmented state, explanatory notice, button label, and icon. Settings tabs/theme/density/segmented controls update immediately before save.
+- Shortcut recording requires Ctrl/Alt/Win, rejects `Ctrl+K` because it is reserved for search, supports Escape/reset, and the saved shortcut opens Quick Tag globally.
+- Escape closes the topmost modal first, then status drawer, then responsive navigation. Drag enter/leave depth controls the drop overlay; drop opens Import. Desktop-width media state keeps the inspector open only at 1280px or wider.
+- Search view adds a type segmented control plus AND/OR/NOT filter chips; Inbox adds a current-space/global scope segmented control and untagged count. These are separate strips below the persistent command bar.
+- Production `home_screen.dart` is currently ~163 KB and mixes app commands, modal flows, domain actions, and UI widgets. Exact parity should preserve callbacks/results while extracting a prototype-oriented presentation layer instead of adding more layout patches to the monolith.
+- Existing production settings only expose three categories, while parity requires five; current navigation/resource/hierarchy components can supply data/actions but their visual hierarchy must be replaced.
+- Existing reference screenshots cover main desktop/1024/768/375, responsive navigation, hierarchy desktop/portrait/landscape, Quick Tag desktop/portrait, Import desktop/portrait, Settings light/dark/portrait, and status history desktop.
+- The local environment has `npx`, Node, and Bash, so the Playwright wrapper prerequisites are satisfied for clean-state browser replay.
+- Visual review confirms a quiet, dense Windows utility: hierarchy comes from 1px rules, cool-gray surfaces, and primary-soft selection, not decorative cards or oversized typography.
+- At 1440x900 the main table occupies the full remaining white workspace, navigation and inspector run edge-to-edge, and all persistent regions align exactly under the 32px title bar.
+- At 1024x768 the 72px navigation rail preserves icon alignment and active indicator while the inspector is absent until invoked; the main table expands into the released width.
+- Quick Tag visually uses a compact 560px single-column dialog with a 48% dimming scrim, thin dividers, selected tag row, inheritance toggle, and right-aligned footer actions.
+- Settings visually uses a 900px dialog with a pale 200px category rail, unframed content panel, sparse ruled setting rows, and a subtle footer band.
+- The previously generated generic design-system master conflicts with the authoritative prototype (different palette, font, radii, card treatment, and marketing-oriented page pattern). Under the user's exact-parity direction, prototype CSS tokens override those generic recommendations.
+- Playwright CLI starts successfully, but Chromium blocks direct `file://` navigation in this environment. Prototype replay must use a local HTTP server.
+- Clean HTTP replay at desktop confirms the semantic contract: one main navigation, one main workspace, seven-column table with independent checkboxes, one complementary resource inspector, and named controls for every primary action.
+- The snapshot confirms that inspector content is part of the desktop accessibility tree from initial load, not a placeholder or post-selection-only surface.
+- Current production state already exposes reusable callbacks for import, backup/restore, space portability, consistency scanning, Quick Tag/hotkey, floating drop target, and Windows file actions; parity work can leave these domain workflows intact.
+- The current root uses a native Material Scaffold/AppBar plus a two-column Row. It must be replaced by prototype-owned chrome and responsive three-region stacking while preserving the existing `DropTarget` and `AnimatedBuilder` data flow.
+- Production search currently expands into a tall advanced-filter form and resource selection uses an explicit mode. Prototype parity instead requires a persistent 46px search command bar and always-available independent checkboxes.
+- Controller APIs already model all five views, search kind, AND/OR/NOT tag conditions, Inbox scope, active tag placement/path, effective direct/inherited tags, resource selection, and space switching.
+- Prototype row focus/inspector selection must be separated at the presentation layer from controller batch checkbox IDs; no persistence/database schema change is required for that distinction.
+- Controller hierarchy helpers already provide root/children/path/resources and cycle prevention for create/reuse; the parity relationship editor can wrap the existing placement update command once located.
+- The page-level `design-system/tagtag/pages/workspace.md` correctly overrides the generic master and matches the prototype's exact palette, system typography, flat bordered surfaces, breakpoints, motion, and icon discipline.
+- No Windows frame-management package is currently cached or declared. Exact 32px title-bar parity requires a minimal window-manager integration to hide the native caption and expose drag/minimize/maximize/close while leaving existing runner lifecycle logic in control.
+- Added `window_manager`; dependency resolution selected 0.5.2. `flutter pub get` completed but emitted the standard Windows symlink/Developer Mode warning, so plugin generation/build must be verified before relying on it.
+- The supplied logo is a square bitmap with a light-blue layered folder and warm bookmark on a dark vignette. It can be used as the required 20/32px brand image with a stable square crop, but should not be stretched horizontally.
+- First parity-shell analysis produced no compile errors. Remaining findings were limited to three intentionally retained legacy declarations becoming unused plus local style lints; no controller/plugin/type incompatibility was found.

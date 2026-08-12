@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>TAGTAG UI Refresh Prototype</title>
+    <link rel="icon" href="app_icon.ico" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主内容</a>
+
+    <svg class="icon-sprite" aria-hidden="true">
+      <symbol id="i-tag" viewBox="0 0 24 24">
+        <path
+          d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"
+        />
+        <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+      </symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24">
+        <path
+          d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"
+        />
+      </symbol>
+      <symbol id="i-folder-open" viewBox="0 0 24 24">
+        <path
+          d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6A2 2 0 0 1 18.46 20H5a3 3 0 0 1-3-3V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.69.9H18a2 2 0 0 1 2 2v2"
+        />
+      </symbol>
+      <symbol id="i-file" viewBox="0 0 24 24">
+        <path
+          d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"
+        />
+        <polyline points="14 2 14 8 20 8" />
+      </symbol>
+      <symbol id="i-file-text" viewBox="0 0 24 24">
+        <path
+          d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z"
+        />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="8" y1="13" x2="16" y2="13" />
+        <line x1="8" y1="17" x2="16" y2="17" />
+      </symbol>
+      <symbol id="i-image" viewBox="0 0 24 24">
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <circle cx="9" cy="9" r="2" />
+        <path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21" />
+      </symbol>
+      <symbol id="i-inbox" viewBox="0 0 24 24">
+        <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+        <path
+          d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+        />
+      </symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9" />
+        <polyline points="12 7 12 12 15 14" />
+      </symbol>
+      <symbol id="i-search" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="8" />
+        <path d="m21 21-4.3-4.3" />
+      </symbol>
+      <symbol id="i-settings" viewBox="0 0 24 24">
+        <path
+          d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+        />
+        <circle cx="12" cy="12" r="3" />
+      </symbol>
+      <symbol id="i-menu" viewBox="0 0 24 24">
+        <line x1="4" x2="20" y1="6" y2="6" />
+        <line x1="4" x2="20" y1="12" y2="12" />
+        <line x1="4" x2="20" y1="18" y2="18" />
+      </symbol>
+      <symbol id="i-chevron-down" viewBox="0 0 24 24">
+        <polyline points="6 9 12 15 18 9" />
+      </symbol>
+      <symbol id="i-chevron-right" viewBox="0 0 24 24">
+        <polyline points="9 18 15 12 9 6" />
+      </symbol>
+      <symbol id="i-chevron-left" viewBox="0 0 24 24">
+        <polyline points="15 18 9 12 15 6" />
+      </symbol>
+      <symbol id="i-upload" viewBox="0 0 24 24">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" x2="12" y1="3" y2="15" />
+      </symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24">
+        <line x1="12" x2="12" y1="5" y2="19" />
+        <line x1="5" x2="19" y1="12" y2="12" />
+      </symbol>
+      <symbol id="i-panel" viewBox="0 0 24 24">
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <path d="M15 3v18" />
+      </symbol>
+      <symbol id="i-more" viewBox="0 0 24 24">
+        <circle cx="5" cy="12" r="1" fill="currentColor" />
+        <circle cx="12" cy="12" r="1" fill="currentColor" />
+        <circle cx="19" cy="12" r="1" fill="currentColor" />
+      </symbol>
+      <symbol id="i-external" viewBox="0 0 24 24">
+        <path d="M15 3h6v6" />
+        <path d="M10 14 21 3" />
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      </symbol>
+      <symbol id="i-x" viewBox="0 0 24 24">
+        <line x1="18" x2="6" y1="6" y2="18" />
+        <line x1="6" x2="18" y1="6" y2="18" />
+      </symbol>
+      <symbol id="i-check" viewBox="0 0 24 24">
+        <polyline points="20 6 9 17 4 12" />
+      </symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24">
+        <path
+          d="m21.7 18-8-14a2 2 0 0 0-3.4 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.7-3z"
+        />
+        <line x1="12" x2="12" y1="9" y2="13" />
+        <line x1="12" x2="12.01" y1="17" y2="17" />
+      </symbol>
+      <symbol id="i-history" viewBox="0 0 24 24">
+        <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
+        <path d="M3 3v5h5" />
+        <path d="M12 7v5l4 2" />
+      </symbol>
+      <symbol id="i-database" viewBox="0 0 24 24">
+        <ellipse cx="12" cy="5" rx="9" ry="3" />
+        <path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5" />
+        <path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3" />
+      </symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24">
+        <path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z" />
+        <polyline points="9 12 11 14 15 10" />
+      </symbol>
+      <symbol id="i-copy" viewBox="0 0 24 24">
+        <rect width="14" height="14" x="8" y="8" rx="2" />
+        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+      </symbol>
+      <symbol id="i-move" viewBox="0 0 24 24">
+        <path d="M5 9 2 12l3 3" />
+        <path d="M9 5 12 2l3 3" />
+        <path d="m15 19-3 3-3-3" />
+        <path d="m19 9 3 3-3 3" />
+        <path d="M2 12h20" />
+        <path d="M12 2v20" />
+      </symbol>
+      <symbol id="i-link" viewBox="0 0 24 24">
+        <path d="M10 13a5 5 0 0 0 7.5.5l2-2a5 5 0 0 0-7.1-7.1l-1.1 1.1" />
+        <path d="M14 11a5 5 0 0 0-7.5-.5l-2 2a5 5 0 0 0 7.1 7.1l1.1-1.1" />
+      </symbol>
+      <symbol id="i-branch" viewBox="0 0 24 24">
+        <line x1="6" x2="6" y1="3" y2="15" />
+        <circle cx="18" cy="6" r="3" />
+        <circle cx="6" cy="18" r="3" />
+        <path d="M18 9a9 9 0 0 1-9 9" />
+      </symbol>
+      <symbol id="i-hard-drive" viewBox="0 0 24 24">
+        <line x1="22" x2="2" y1="12" y2="12" />
+        <path
+          d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"
+        />
+        <line x1="6" x2="6.01" y1="16" y2="16" />
+        <line x1="10" x2="10.01" y1="16" y2="16" />
+      </symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24">
+        <rect width="20" height="16" x="2" y="4" rx="2" />
+        <path
+          d="M6 8h.001M10 8h.001M14 8h.001M18 8h.001M8 12h.001M12 12h.001M16 12h.001M7 16h10"
+        />
+      </symbol>
+      <symbol id="i-monitor" viewBox="0 0 24 24">
+        <rect width="20" height="14" x="2" y="3" rx="2" />
+        <line x1="8" x2="16" y1="21" y2="21" />
+        <line x1="12" x2="12" y1="17" y2="21" />
+      </symbol>
+      <symbol id="i-palette" viewBox="0 0 24 24">
+        <circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
+        <circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
+        <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
+        <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
+        <path
+          d="M12 22a10 10 0 1 1 10-10c0 2.2-1.8 4-4 4h-1.8a2 2 0 0 0-1.7 3l.2.3c.7 1.2-.2 2.7-1.6 2.7z"
+        />
+      </symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="4" />
+        <path
+          d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"
+        />
+      </symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24">
+        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9" />
+      </symbol>
+    </svg>
+
+    <div class="app-window" id="appWindow">
+      <header class="window-bar" aria-label="应用标题栏">
+        <div class="window-identity">
+          <img src="app_icon.ico" alt="" width="20" height="20" />
+          <span>TAGTAG</span>
+          <span class="window-context" data-active-space>创作素材</span>
+        </div>
+        <div class="window-controls" aria-hidden="true">
+          <span>—</span><span>□</span><span>×</span>
+        </div>
+      </header>
+
+      <div class="workspace-grid">
+        <nav class="side-nav" id="sideNav" aria-label="主导航">
+          <div class="brand-block">
+            <span class="brand-mark"
+              ><svg><use href="#i-tag"></use></svg
+            ></span>
+            <div><strong>TAGTAG</strong><span>本地资料库</span></div>
+          </div>
+
+          <div class="space-switcher-wrap">
+            <button
+              class="space-switcher"
+              id="spaceSwitcher"
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-controls="spaceMenu"
+            >
+              <span class="space-swatch"></span
+              ><span class="nav-label" data-active-space>创作素材</span>
+              <svg><use href="#i-chevron-down"></use></svg>
+            </button>
+            <div
+              class="space-menu"
+              id="spaceMenu"
+              role="listbox"
+              aria-label="选择标签空间"
+              hidden
+            >
+              <button
+                class="space-option is-selected"
+                type="button"
+                role="option"
+                aria-selected="true"
+                data-space-value="创作素材"
+              >
+                <span class="space-swatch"></span>
+                <span><strong>创作素材</strong><small>128 个资源</small></span>
+                <svg><use href="#i-check"></use></svg>
+              </button>
+              <button
+                class="space-option"
+                type="button"
+                role="option"
+                aria-selected="false"
+                data-space-value="团队共享"
+              >
+                <span class="space-swatch green"></span>
+                <span><strong>团队共享</strong><small>46 个资源</small></span>
+                <svg><use href="#i-check"></use></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-heading">资料库</p>
+            <button class="nav-item is-active" type="button" data-view="all">
+              <svg><use href="#i-folder"></use></svg
+              ><span class="nav-label">全部资源</span
+              ><span class="nav-count">128</span>
+            </button>
+            <button class="nav-item" type="button" data-view="inbox">
+              <svg><use href="#i-inbox"></use></svg
+              ><span class="nav-label">待整理</span
+              ><span class="nav-badge">7</span>
+            </button>
+            <button class="nav-item" type="button" data-view="recent">
+              <svg><use href="#i-clock"></use></svg
+              ><span class="nav-label">最近</span>
+            </button>
+            <button class="nav-item" type="button" data-view="search">
+              <svg><use href="#i-search"></use></svg
+              ><span class="nav-label">搜索</span>
+            </button>
+          </div>
+
+          <div class="nav-group">
+            <p class="nav-heading">组织</p>
+            <button class="nav-item" type="button" data-view="tags">
+              <svg><use href="#i-tag"></use></svg
+              ><span class="nav-label">标签层级</span>
+            </button>
+          </div>
+
+          <div class="nav-bottom">
+            <button
+              class="health-button"
+              type="button"
+              data-toggle-drawer
+              aria-controls="statusDrawer"
+              aria-expanded="false"
+              aria-label="资料库正常，上次扫描 1 分钟前"
+            >
+              <span class="status-dot"></span
+              ><span class="nav-label"
+                ><strong>资料库正常</strong
+                ><small>上次扫描 1 分钟前</small></span
+              ><svg><use href="#i-chevron-right"></use></svg>
+            </button>
+            <button class="nav-item" type="button" data-open-settings>
+              <svg><use href="#i-settings"></use></svg
+              ><span class="nav-label">设置</span>
+            </button>
+          </div>
+        </nav>
+
+        <main class="main-area" id="main-content" tabindex="-1">
+          <header class="main-header">
+            <button
+              class="icon-button mobile-menu"
+              type="button"
+              id="mobileMenu"
+              aria-label="打开导航"
+            >
+              <svg><use href="#i-menu"></use></svg>
+            </button>
+            <nav class="breadcrumbs" aria-label="当前位置">
+              <span>本地资料库</span
+              ><svg><use href="#i-chevron-right"></use></svg
+              ><strong data-active-space>创作素材</strong>
+            </nav>
+            <div class="header-actions">
+              <button
+                class="button primary-button"
+                type="button"
+                data-open-import
+                aria-label="导入资源"
+              >
+                <svg><use href="#i-upload"></use></svg><span>导入</span>
+              </button>
+            </div>
+          </header>
+
+          <section class="content-header">
+            <div>
+              <h1 id="viewTitle">全部资源</h1>
+              <p id="viewSubtitle">当前空间中的 128 个受管资源</p>
+            </div>
+            <button
+              class="button secondary-button"
+              type="button"
+              data-open-quick
+              aria-label="快速标注"
+            >
+              <svg><use href="#i-tag"></use></svg><span>快速标注</span>
+            </button>
+          </section>
+
+          <section class="command-bar" aria-label="资源命令">
+            <label class="search-box" for="resourceSearch"
+              ><svg><use href="#i-search"></use></svg
+              ><input
+                id="resourceSearch"
+                type="search"
+                aria-label="搜索资源"
+                placeholder="搜索名称、路径或标签"
+                autocomplete="off" /><button
+                type="button"
+                id="clearSearch"
+                aria-label="清除搜索"
+              >
+                <svg><use href="#i-x"></use></svg></button
+            ></label>
+            <div class="command-spacer"></div>
+            <div
+              class="selection-summary"
+              id="selectionSummary"
+              aria-live="polite"
+            ></div>
+            <button
+              class="button text-button"
+              type="button"
+              id="tagSelection"
+              disabled
+            >
+              <svg><use href="#i-tag"></use></svg><span>添加标签</span>
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              id="toggleInspector"
+              aria-label="显示资源详情"
+              title="显示资源详情"
+            >
+              <svg><use href="#i-panel"></use></svg>
+            </button>
+          </section>
+
+          <section
+            class="filter-strip"
+            id="filterStrip"
+            hidden
+            aria-label="高级筛选"
+          >
+            <div class="segmented small" data-kind-filter>
+              <button class="is-selected" type="button">全部</button
+              ><button type="button">文件</button
+              ><button type="button">文件夹</button>
+            </div>
+            <button class="filter-chip is-active" type="button">
+              设计 · AND
+            </button>
+            <button class="filter-chip" type="button">归档 · OR</button>
+            <button class="filter-chip negative" type="button">
+              已完成 · NOT
+            </button>
+            <button class="button text-button" type="button" id="clearFilters">
+              清除
+            </button>
+          </section>
+
+          <section
+            class="scope-strip"
+            id="scopeStrip"
+            hidden
+            aria-label="待整理范围"
+          >
+            <div class="segmented">
+              <button class="is-selected" type="button">当前空间</button
+              ><button type="button">全局</button>
+            </div>
+            <span>7 个资源没有有效标签</span>
+          </section>
+
+          <section class="resource-view" id="resourceView">
+            <table class="resource-table">
+              <thead>
+                <tr>
+                  <th class="select-cell">
+                    <input
+                      type="checkbox"
+                      id="selectAll"
+                      aria-label="选择全部可见资源"
+                    />
+                  </th>
+                  <th>名称</th>
+                  <th class="col-tags">有效标签</th>
+                  <th class="col-type">类型</th>
+                  <th class="col-size">大小</th>
+                  <th class="col-modified">修改时间</th>
+                  <th class="actions-cell">
+                    <span class="sr-only">操作</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody id="resourceRows">
+                <tr
+                  tabindex="0"
+                  data-id="brand"
+                  data-name="2026 品牌视觉规范.fig"
+                  data-path="存储根 / Design / Brand"
+                  data-type="FIG 文件"
+                  data-size="18.4 MB"
+                  data-modified="今天 14:32"
+                  data-status="all recent"
+                  class="is-selected"
+                >
+                  <td class="select-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="选择 2026 品牌视觉规范.fig"
+                    />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon fig"
+                        ><svg><use href="#i-file"></use></svg></span
+                      ><span
+                        ><strong>2026 品牌视觉规范.fig</strong
+                        ><small>Design / Brand</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags">
+                    <div class="tag-list">
+                      <span class="tag-chip blue"><span></span>设计</span
+                      ><span class="tag-chip green"><span></span>品牌</span>
+                    </div>
+                  </td>
+                  <td class="col-type">FIG 文件</td>
+                  <td class="col-size">18.4 MB</td>
+                  <td class="col-modified">今天 14:32</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开 2026 品牌视觉规范.fig"
+                      title="打开"
+                    >
+                      <svg><use href="#i-external"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  tabindex="0"
+                  data-id="photos"
+                  data-name="产品摄影"
+                  data-path="存储根 / Media"
+                  data-type="文件夹"
+                  data-size="2.8 GB"
+                  data-modified="今天 11:08"
+                  data-status="all recent"
+                >
+                  <td class="select-cell">
+                    <input type="checkbox" aria-label="选择 产品摄影" />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon folder"
+                        ><svg><use href="#i-folder"></use></svg></span
+                      ><span
+                        ><strong>产品摄影</strong><small>Media</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags">
+                    <div class="tag-list">
+                      <span class="tag-chip purple"><span></span>图像</span
+                      ><span class="tag-chip inherited"
+                        ><svg><use href="#i-branch"></use></svg>项目 A</span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-type">文件夹</td>
+                  <td class="col-size">2.8 GB</td>
+                  <td class="col-modified">今天 11:08</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开 产品摄影"
+                      title="打开"
+                    >
+                      <svg><use href="#i-folder-open"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  tabindex="0"
+                  data-id="contract"
+                  data-name="供应商合同 - 秋季活动.pdf"
+                  data-path="存储根 / Operations / Contracts"
+                  data-type="PDF 文档"
+                  data-size="3.2 MB"
+                  data-modified="昨天 18:45"
+                  data-status="all"
+                >
+                  <td class="select-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="选择 供应商合同 - 秋季活动.pdf"
+                    />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon pdf"
+                        ><svg><use href="#i-file-text"></use></svg></span
+                      ><span
+                        ><strong>供应商合同 - 秋季活动.pdf</strong
+                        ><small>Operations / Contracts</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags">
+                    <div class="tag-list">
+                      <span class="tag-chip amber"><span></span>合同</span
+                      ><span class="tag-chip red"><span></span>重要</span>
+                    </div>
+                  </td>
+                  <td class="col-type">PDF 文档</td>
+                  <td class="col-size">3.2 MB</td>
+                  <td class="col-modified">昨天 18:45</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开合同"
+                      title="打开"
+                    >
+                      <svg><use href="#i-external"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  tabindex="0"
+                  data-id="moodboard"
+                  data-name="秋季 Campaign Moodboard.jpg"
+                  data-path="存储根 / Campaigns / Autumn"
+                  data-type="JPEG 图像"
+                  data-size="8.7 MB"
+                  data-modified="8 月 9 日"
+                  data-status="all"
+                >
+                  <td class="select-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="选择 秋季 Campaign Moodboard.jpg"
+                    />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon image"
+                        ><svg><use href="#i-image"></use></svg></span
+                      ><span
+                        ><strong>秋季 Campaign Moodboard.jpg</strong
+                        ><small>Campaigns / Autumn</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags">
+                    <div class="tag-list">
+                      <span class="tag-chip purple"><span></span>图像</span
+                      ><span class="tag-chip blue"><span></span>灵感</span>
+                    </div>
+                  </td>
+                  <td class="col-type">JPEG 图像</td>
+                  <td class="col-size">8.7 MB</td>
+                  <td class="col-modified">8 月 9 日</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开图像"
+                      title="打开"
+                    >
+                      <svg><use href="#i-external"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  tabindex="0"
+                  data-id="budget"
+                  data-name="Q3_campaign_budget.xlsx"
+                  data-path="存储根 / Finance"
+                  data-type="Excel 工作簿"
+                  data-size="764 KB"
+                  data-modified="8 月 7 日"
+                  data-status="all"
+                >
+                  <td class="select-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="选择 Q3_campaign_budget.xlsx"
+                    />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon sheet"
+                        ><svg><use href="#i-file-text"></use></svg></span
+                      ><span
+                        ><strong>Q3_campaign_budget.xlsx</strong
+                        ><small>Finance</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags">
+                    <div class="tag-list">
+                      <span class="tag-chip green"><span></span>财务</span>
+                    </div>
+                  </td>
+                  <td class="col-type">Excel 工作簿</td>
+                  <td class="col-size">764 KB</td>
+                  <td class="col-modified">8 月 7 日</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开工作簿"
+                      title="打开"
+                    >
+                      <svg><use href="#i-external"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  tabindex="0"
+                  data-id="notes"
+                  data-name="未命名笔记.txt"
+                  data-path="存储根 / Inbox"
+                  data-type="文本文档"
+                  data-size="12 KB"
+                  data-modified="8 月 6 日"
+                  data-status="all inbox"
+                >
+                  <td class="select-cell">
+                    <input type="checkbox" aria-label="选择 未命名笔记.txt" />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon text"
+                        ><svg><use href="#i-file-text"></use></svg></span
+                      ><span
+                        ><strong>未命名笔记.txt</strong
+                        ><small>Inbox</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags"><span class="untagged">未标注</span></td>
+                  <td class="col-type">文本文档</td>
+                  <td class="col-size">12 KB</td>
+                  <td class="col-modified">8 月 6 日</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开笔记"
+                      title="打开"
+                    >
+                      <svg><use href="#i-external"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+                <tr
+                  tabindex="0"
+                  data-id="capture"
+                  data-name="ScreenCapture_0812.png"
+                  data-path="存储根 / Inbox"
+                  data-type="PNG 图像"
+                  data-size="2.1 MB"
+                  data-modified="8 月 6 日"
+                  data-status="all inbox"
+                >
+                  <td class="select-cell">
+                    <input
+                      type="checkbox"
+                      aria-label="选择 ScreenCapture_0812.png"
+                    />
+                  </td>
+                  <td>
+                    <div class="file-identity">
+                      <span class="file-icon image"
+                        ><svg><use href="#i-image"></use></svg></span
+                      ><span
+                        ><strong>ScreenCapture_0812.png</strong
+                        ><small>Inbox</small></span
+                      >
+                    </div>
+                  </td>
+                  <td class="col-tags"><span class="untagged">未标注</span></td>
+                  <td class="col-type">PNG 图像</td>
+                  <td class="col-size">2.1 MB</td>
+                  <td class="col-modified">8 月 6 日</td>
+                  <td class="actions-cell">
+                    <button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="打开截图"
+                      title="打开"
+                    >
+                      <svg><use href="#i-external"></use></svg></button
+                    ><button
+                      class="icon-button row-action"
+                      type="button"
+                      aria-label="更多操作"
+                      title="更多操作"
+                    >
+                      <svg><use href="#i-more"></use></svg>
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="empty-state" id="emptyState" hidden>
+              <svg><use href="#i-search"></use></svg
+              ><strong>没有符合条件的资源</strong
+              ><button class="button text-button" type="button" id="emptyClear">
+                清除搜索
+              </button>
+            </div>
+          </section>
+
+          <section class="tag-workbench" id="tagWorkbench" hidden>
+            <div class="tag-tree-panel">
+              <header>
+                <div>
+                  <h2>标签层级</h2>
+                  <span id="tagTreeStats">24 个标签实体 · 31 个位置</span>
+                </div>
+                <button
+                  class="icon-button"
+                  id="focusHierarchyEditor"
+                  type="button"
+                  aria-label="设置标签层级"
+                  title="设置标签层级"
+                >
+                  <svg><use href="#i-branch"></use></svg>
+                </button>
+              </header>
+              <div
+                class="tree-list"
+                id="tagTreeList"
+                aria-label="标签层级列表"
+              ></div>
+              <section
+                class="hierarchy-editor"
+                id="hierarchyEditor"
+                aria-labelledby="hierarchyEditorTitle"
+              >
+                <div class="hierarchy-editor-heading">
+                  <span><svg><use href="#i-branch"></use></svg></span>
+                  <div>
+                    <h3 id="hierarchyEditorTitle">设置标签层级</h3>
+                    <p id="hierarchySelectionHint">已选择“设计”</p>
+                  </div>
+                </div>
+                <label for="parentTagSelect">上级标签</label>
+                <select id="parentTagSelect" aria-describedby="hierarchyFeedback">
+                  <option value="">无上级（顶层）</option>
+                </select>
+                <p class="field-feedback" id="hierarchyFeedback" role="status">
+                  修改后会立即更新左侧层级列表
+                </p>
+                <button
+                  class="button secondary-button hierarchy-apply"
+                  id="applyHierarchy"
+                  type="button"
+                >
+                  <svg><use href="#i-branch"></use></svg
+                  ><span>应用层级</span>
+                </button>
+              </section>
+            </div>
+            <div class="tag-result-panel">
+              <header>
+                <div>
+                  <h2 id="selectedTagName">设计</h2>
+                  <p id="selectedTagSummary">
+                    <span class="tag-chip blue"><span></span>唯一标签</span> 2
+                    个位置共享同一资源集合
+                  </p>
+                </div>
+                <button class="icon-button" type="button" aria-label="标签操作">
+                  <svg><use href="#i-more"></use></svg>
+                </button>
+              </header>
+              <div class="placement-paths">
+                <span>标签位置</span><button type="button">创作 / 设计</button
+                ><button type="button">团队 / 共享 / 设计</button>
+              </div>
+              <div class="tag-result-list">
+                <div class="compact-resource">
+                  <span class="file-icon fig"
+                    ><svg><use href="#i-file"></use></svg
+                  ></span>
+                  <div>
+                    <strong>2026 品牌视觉规范.fig</strong
+                    ><small>Design / Brand</small>
+                  </div>
+                  <span>今天 14:32</span>
+                </div>
+                <div class="compact-resource">
+                  <span class="file-icon image"
+                    ><svg><use href="#i-image"></use></svg
+                  ></span>
+                  <div>
+                    <strong>秋季 Campaign Moodboard.jpg</strong
+                    ><small>Campaigns / Autumn</small>
+                  </div>
+                  <span>8 月 9 日</span>
+                </div>
+                <div class="compact-resource">
+                  <span class="file-icon folder"
+                    ><svg><use href="#i-folder"></use></svg
+                  ></span>
+                  <div><strong>产品摄影</strong><small>Media</small></div>
+                  <span>今天 11:08</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <aside class="inspector is-open" id="inspector" aria-label="资源详情">
+          <header class="inspector-header">
+            <h2>资源详情</h2>
+            <button
+              class="icon-button inspector-close"
+              type="button"
+              aria-label="关闭资源详情"
+            >
+              <svg><use href="#i-x"></use></svg>
+            </button>
+          </header>
+          <div class="inspector-hero">
+            <span class="file-icon large fig" id="inspectorIcon"
+              ><svg><use href="#i-file"></use></svg
+            ></span>
+            <h3 id="inspectorName">2026 品牌视觉规范.fig</h3>
+            <p id="inspectorType">FIG 文件 · 18.4 MB</p>
+            <div class="inspector-actions">
+              <button class="button primary-button" type="button">
+                <svg><use href="#i-external"></use></svg
+                ><span>打开</span></button
+              ><button class="button secondary-button" type="button">
+                <svg><use href="#i-folder-open"></use></svg><span>定位</span>
+              </button>
+            </div>
+          </div>
+          <section class="inspector-section">
+            <div class="section-heading">
+              <h4>有效标签</h4>
+              <button
+                class="icon-button"
+                type="button"
+                data-open-quick
+                aria-label="编辑标签"
+              >
+                <svg><use href="#i-plus"></use></svg>
+              </button>
+            </div>
+            <div class="inspector-tags">
+              <span class="tag-chip blue"><span></span>设计</span
+              ><span class="tag-chip green"><span></span>品牌</span>
+            </div>
+          </section>
+          <section class="inspector-section">
+            <h4>位置</h4>
+            <button class="path-button" type="button">
+              <svg><use href="#i-folder"></use></svg
+              ><span id="inspectorPath">存储根 / Design / Brand</span
+              ><svg><use href="#i-external"></use></svg>
+            </button>
+          </section>
+          <section class="inspector-section metadata-grid">
+            <h4>信息</h4>
+            <dl>
+              <div>
+                <dt>类型</dt>
+                <dd id="metaType">FIG 文件</dd>
+              </div>
+              <div>
+                <dt>大小</dt>
+                <dd id="metaSize">18.4 MB</dd>
+              </div>
+              <div>
+                <dt>修改时间</dt>
+                <dd id="metaModified">今天 14:32</dd>
+              </div>
+              <div>
+                <dt>空间成员</dt>
+                <dd>创作素材、团队共享</dd>
+              </div>
+            </dl>
+          </section>
+          <section class="inspector-section">
+            <h4>标签来源</h4>
+            <div class="source-row">
+              <svg><use href="#i-tag"></use></svg>
+              <div><strong>直接标注</strong><span>设计、品牌</span></div>
+            </div>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <div class="mobile-backdrop" id="mobileBackdrop"></div>
+    <div class="drop-overlay" id="dropOverlay">
+      <div>
+        <svg><use href="#i-upload"></use></svg><strong>释放以导入并标注</strong
+        ><span>2 个资源</span>
+      </div>
+    </div>
+
+    <aside
+      class="status-drawer"
+      id="statusDrawer"
+      aria-hidden="true"
+      aria-label="资料库状态"
+    >
+      <header>
+        <div>
+          <span class="status-dot"></span>
+          <div>
+            <h2>资料库状态</h2>
+            <p>D:\TAGTAG Library</p>
+          </div>
+        </div>
+        <button
+          class="icon-button"
+          type="button"
+          data-close-drawer
+          aria-label="关闭状态中心"
+        >
+          <svg><use href="#i-x"></use></svg>
+        </button>
+      </header>
+      <div class="drawer-tabs" role="tablist">
+        <button
+          class="is-active"
+          type="button"
+          role="tab"
+          data-drawer-tab="health"
+        >
+          健康状态</button
+        ><button type="button" role="tab" data-drawer-tab="history">
+          操作日志
+        </button>
+      </div>
+      <div class="drawer-panel" data-drawer-panel="health">
+        <div class="health-summary">
+          <svg><use href="#i-shield"></use></svg>
+          <div>
+            <strong>所有受管资源均可访问</strong
+            ><span>上次完整扫描：今天 14:35</span>
+          </div>
+        </div>
+        <section>
+          <h3>一致性</h3>
+          <div class="status-row">
+            <span class="status-icon ok"
+              ><svg><use href="#i-check"></use></svg
+            ></span>
+            <div>
+              <strong>128 个资源已核对</strong
+              ><span>没有孤立内容或缺失资源</span>
+            </div>
+          </div>
+        </section>
+        <section>
+          <h3>存储</h3>
+          <div class="storage-meter">
+            <div><span>已使用 38.6 GB</span><span>128 GB</span></div>
+            <progress value="38.6" max="128">30%</progress>
+          </div>
+        </section>
+        <section>
+          <h3>备份</h3>
+          <div class="status-row">
+            <span class="status-icon"
+              ><svg><use href="#i-database"></use></svg
+            ></span>
+            <div>
+              <strong>上次备份：8 月 10 日</strong
+              ><span>完整备份 · 已校验</span>
+            </div>
+            <button class="button secondary-button" type="button">
+              创建备份
+            </button>
+          </div>
+        </section>
+      </div>
+      <div class="drawer-panel" data-drawer-panel="history" hidden>
+        <div class="timeline">
+          <div>
+            <span class="timeline-icon"
+              ><svg><use href="#i-upload"></use></svg
+            ></span>
+            <div>
+              <strong>复制导入 3 个资源</strong
+              ><span>今天 14:32 · Design / Brand</span
+              ><button type="button">撤销</button>
+            </div>
+          </div>
+          <div>
+            <span class="timeline-icon"
+              ><svg><use href="#i-tag"></use></svg
+            ></span>
+            <div>
+              <strong>添加标签“品牌”</strong><span>今天 14:33 · 3 个资源</span>
+            </div>
+          </div>
+          <div>
+            <span class="timeline-icon"
+              ><svg><use href="#i-move"></use></svg
+            ></span>
+            <div>
+              <strong>移动导入 1 个文件夹</strong
+              ><span>昨天 18:45 · Campaigns</span
+              ><button type="button">撤销</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="modal-layer" id="quickTagModal" aria-hidden="true">
+      <section
+        class="dialog quick-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="quickTitle"
+      >
+        <header class="dialog-header">
+          <div>
+            <span class="dialog-icon"
+              ><svg><use href="#i-tag"></use></svg
+            ></span>
+            <div>
+              <h2 id="quickTitle">快速标注</h2>
+              <p>
+                <span id="quickCount">1</span> 个资源 ·
+                <span data-active-space>创作素材</span>
+              </p>
+            </div>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            data-close-modal
+            aria-label="关闭"
+          >
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="dialog-body">
+          <label class="search-box modal-search"
+            ><svg><use href="#i-search"></use></svg
+            ><input
+              type="search"
+              id="tagSearch"
+              aria-label="搜索标签"
+              placeholder="搜索标签名称或路径"
+              autocomplete="off"
+          /></label>
+          <div class="recent-tags">
+            <span>最近使用</span
+            ><button
+              class="tag-option is-selected"
+              type="button"
+              data-tag-option
+            >
+              <span class="tree-swatch blue"></span
+              ><span><strong>设计</strong><small>创作 / 设计</small></span
+              ><svg><use href="#i-check"></use></svg></button
+            ><button class="tag-option" type="button" data-tag-option>
+              <span class="tree-swatch green"></span
+              ><span
+                ><strong>品牌</strong><small>创作 / 设计 / 品牌</small></span
+              ><svg><use href="#i-check"></use></svg></button
+            ><button class="tag-option" type="button" data-tag-option>
+              <span class="tree-swatch purple"></span
+              ><span><strong>灵感</strong><small>个人 / 灵感</small></span
+              ><svg><use href="#i-check"></use></svg></button
+            ><button class="tag-option" type="button" data-tag-option>
+              <span class="tree-swatch amber"></span
+              ><span><strong>项目 A</strong><small>项目 / 项目 A</small></span
+              ><svg><use href="#i-check"></use></svg>
+            </button>
+          </div>
+          <label class="toggle-row"
+            ><span
+              ><svg><use href="#i-branch"></use></svg
+              ><span
+                ><strong>子项继承</strong
+                ><small>应用到文件夹中的当前和未来子项</small></span
+              ></span
+            ><input class="switch-input" type="checkbox" /><span
+              class="switch"
+              aria-hidden="true"
+            ></span
+          ></label>
+        </div>
+        <footer class="dialog-footer">
+          <button class="button text-button" type="button" data-close-modal>
+            取消</button
+          ><button class="button primary-button" type="button" id="applyTags">
+            <svg><use href="#i-tag"></use></svg><span>添加 1 个标签</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-layer" id="importModal" aria-hidden="true">
+      <section
+        class="dialog import-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="importTitle"
+      >
+        <header class="dialog-header">
+          <div>
+            <span class="dialog-icon"
+              ><svg><use href="#i-upload"></use></svg
+            ></span>
+            <div>
+              <h2 id="importTitle">导入并标注</h2>
+              <p>2 个资源 · 86.2 MB</p>
+            </div>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            data-close-modal
+            aria-label="关闭"
+          >
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="import-layout">
+          <div class="import-main">
+            <section class="form-section">
+              <div class="section-label">
+                <span>来源</span><button type="button">重新选择</button>
+              </div>
+              <div class="source-list">
+                <div>
+                  <span class="file-icon image"
+                    ><svg><use href="#i-image"></use></svg></span
+                  ><span
+                    ><strong>launch-keyvisual.png</strong
+                    ><small>C:\Users\zcc\Desktop · 42.8 MB</small></span
+                  ><button class="icon-button" type="button" aria-label="移除">
+                    <svg><use href="#i-x"></use></svg>
+                  </button>
+                </div>
+                <div>
+                  <span class="file-icon folder"
+                    ><svg><use href="#i-folder"></use></svg></span
+                  ><span
+                    ><strong>final-export</strong
+                    ><small>C:\Users\zcc\Desktop · 43.4 MB</small></span
+                  ><button class="icon-button" type="button" aria-label="移除">
+                    <svg><use href="#i-x"></use></svg>
+                  </button>
+                </div>
+              </div>
+            </section>
+            <section class="form-section">
+              <span class="section-label">存储位置</span
+              ><button class="destination-picker" type="button">
+                <svg><use href="#i-folder"></use></svg
+                ><span
+                  ><strong>Campaigns / Autumn</strong
+                  ><small>D:\TAGTAG Library\Campaigns\Autumn</small></span
+                ><svg><use href="#i-chevron-right"></use></svg>
+              </button>
+            </section>
+            <section class="form-section grow">
+              <div class="section-label">
+                <span>标签</span><span>已选择 2 个</span>
+              </div>
+              <label class="search-box modal-search"
+                ><svg><use href="#i-search"></use></svg
+                ><input
+                  type="search"
+                  aria-label="搜索导入标签"
+                  placeholder="搜索标签"
+              /></label>
+              <div class="import-tag-grid">
+                <button
+                  class="tag-option is-selected"
+                  type="button"
+                  data-tag-option
+                >
+                  <span class="tree-swatch blue"></span
+                  ><span><strong>设计</strong><small>创作 / 设计</small></span
+                  ><svg><use href="#i-check"></use></svg></button
+                ><button
+                  class="tag-option is-selected"
+                  type="button"
+                  data-tag-option
+                >
+                  <span class="tree-swatch red"></span
+                  ><span
+                    ><strong>秋季活动</strong
+                    ><small>项目 / 秋季活动</small></span
+                  ><svg><use href="#i-check"></use></svg></button
+                ><button class="tag-option" type="button" data-tag-option>
+                  <span class="tree-swatch purple"></span
+                  ><span><strong>图像</strong><small>媒体 / 图像</small></span
+                  ><svg><use href="#i-check"></use></svg>
+                </button>
+              </div>
+            </section>
+          </div>
+          <aside class="import-summary">
+            <h3>导入方式</h3>
+            <div class="segmented import-mode">
+              <button class="is-selected" type="button" data-import-mode="copy">
+                <svg><use href="#i-copy"></use></svg>复制</button
+              ><button type="button" data-import-mode="move">
+                <svg><use href="#i-move"></use></svg>移动
+              </button>
+            </div>
+            <dl>
+              <div>
+                <dt>资源</dt>
+                <dd>2 项</dd>
+              </div>
+              <div>
+                <dt>位置</dt>
+                <dd>Campaigns / Autumn</dd>
+              </div>
+              <div>
+                <dt>标签</dt>
+                <dd>设计、秋季活动</dd>
+              </div>
+            </dl>
+            <div class="notice">
+              <svg><use href="#i-shield"></use></svg
+              ><span id="importNotice">源文件会保留在原位置</span>
+            </div>
+          </aside>
+        </div>
+        <footer class="dialog-footer">
+          <button class="button text-button" type="button" data-close-modal>
+            取消</button
+          ><button
+            class="button primary-button"
+            type="button"
+            id="confirmImport"
+          >
+            <svg><use href="#i-copy"></use></svg><span>复制并导入</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="modal-layer" id="settingsModal" aria-hidden="true">
+      <section
+        class="dialog settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settingsTitle"
+      >
+        <header class="dialog-header">
+          <div>
+            <span class="dialog-icon"
+              ><svg><use href="#i-settings"></use></svg
+            ></span>
+            <div>
+              <h2 id="settingsTitle">设置</h2>
+              <p>资料库、导入和 Windows 集成</p>
+            </div>
+          </div>
+          <button
+            class="icon-button"
+            type="button"
+            data-close-modal
+            aria-label="关闭"
+          >
+            <svg><use href="#i-x"></use></svg>
+          </button>
+        </header>
+        <div class="settings-layout">
+          <nav class="settings-nav" aria-label="设置分类">
+            <button
+              class="is-active"
+              type="button"
+              data-settings-tab="general"
+              aria-label="常规"
+            >
+              <svg><use href="#i-settings"></use></svg><span>常规</span></button
+            ><button
+              type="button"
+              data-settings-tab="imports"
+              aria-label="导入与标注"
+            >
+              <svg><use href="#i-upload"></use></svg
+              ><span>导入与标注</span></button
+            ><button
+              type="button"
+              data-settings-tab="storage"
+              aria-label="存储与备份"
+            >
+              <svg><use href="#i-hard-drive"></use></svg
+              ><span>存储与备份</span></button
+            ><button
+              type="button"
+              data-settings-tab="windows"
+              aria-label="Windows 集成"
+            >
+              <svg><use href="#i-monitor"></use></svg
+              ><span>Windows 集成</span></button
+            ><button
+              type="button"
+              data-settings-tab="appearance"
+              aria-label="外观"
+            >
+              <svg><use href="#i-palette"></use></svg><span>外观</span>
+            </button>
+          </nav>
+          <div class="settings-content">
+            <section class="settings-panel" data-settings-panel="general">
+              <h3>常规</h3>
+              <p class="settings-description">应用行为</p>
+              <div class="setting-row">
+                <div>
+                  <strong>关闭主窗口时</strong
+                  ><span>TAGTAG 继续在系统托盘运行</span>
+                </div>
+                <div class="segmented small">
+                  <button class="is-selected" type="button">隐藏</button
+                  ><button type="button">退出</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>启动视图</strong><span>每次打开 TAGTAG 时显示</span>
+                </div>
+                <select aria-label="启动视图">
+                  <option>上次使用的视图</option>
+                  <option>全部资源</option>
+                  <option>待整理</option>
+                </select>
+              </div>
+            </section>
+            <section
+              class="settings-panel"
+              data-settings-panel="imports"
+              hidden
+            >
+              <h3>导入与标注</h3>
+              <p class="settings-description">默认导入流程</p>
+              <div class="setting-row">
+                <div>
+                  <strong>默认导入方式</strong><span>每次导入时仍可切换</span>
+                </div>
+                <div class="segmented small">
+                  <button class="is-selected" type="button">复制</button
+                  ><button type="button">移动</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>零标签资源</strong
+                  ><span>导入后进入当前空间待整理区</span>
+                </div>
+                <span class="value-label">允许</span>
+              </div>
+            </section>
+            <section
+              class="settings-panel"
+              data-settings-panel="storage"
+              hidden
+            >
+              <h3>存储与备份</h3>
+              <p class="settings-description">全局存储根目录</p>
+              <div class="storage-root">
+                <svg><use href="#i-hard-drive"></use></svg>
+                <div>
+                  <strong>D:\TAGTAG Library</strong
+                  ><span>128 个资源 · 38.6 GB</span>
+                </div>
+                <button class="button secondary-button" type="button">
+                  <svg><use href="#i-folder-open"></use></svg><span>打开</span>
+                </button>
+              </div>
+              <div class="setting-actions">
+                <button class="button secondary-button" type="button">
+                  创建完整备份</button
+                ><button class="button secondary-button" type="button">
+                  从备份恢复
+                </button>
+              </div>
+            </section>
+            <section
+              class="settings-panel"
+              data-settings-panel="windows"
+              hidden
+            >
+              <h3>Windows 集成</h3>
+              <p class="settings-description">系统入口与快捷操作</p>
+              <label class="setting-row"
+                ><div>
+                  <strong>悬浮接收目标</strong
+                  ><span>将资源拖到悬浮目标开始导入</span>
+                </div>
+                <input class="switch-input" type="checkbox" checked /><span
+                  class="switch"
+                  aria-hidden="true"
+                ></span
+              ></label>
+              <div class="setting-row">
+                <div>
+                  <strong>全局 Quick Tag</strong
+                  ><span>从任意窗口打开快速标注</span>
+                </div>
+                <span class="status-label"
+                  ><span class="status-dot"></span>已注册</span
+                >
+              </div>
+              <div class="shortcut-editor">
+                <button
+                  class="shortcut-recorder"
+                  id="shortcutRecorder"
+                  type="button"
+                  aria-pressed="false"
+                  aria-describedby="shortcutHint shortcutError"
+                >
+                  <svg><use href="#i-keyboard"></use></svg>
+                  <span>
+                    <strong id="hotkeyValue">Ctrl + Shift + T</strong>
+                    <small id="shortcutHint">点击后按下新的组合键</small>
+                  </span>
+                </button>
+                <button
+                  class="button text-button"
+                  id="resetHotkey"
+                  type="button"
+                >
+                  恢复默认
+                </button>
+              </div>
+              <p class="field-error" id="shortcutError" role="alert"></p>
+              <div class="setting-row">
+                <div>
+                  <strong>资源管理器右键菜单</strong
+                  ><span>使用 TAGTAG 添加标签</span>
+                </div>
+                <span class="status-label"
+                  ><span class="status-dot"></span>已启用</span
+                >
+              </div>
+            </section>
+            <section
+              class="settings-panel"
+              data-settings-panel="appearance"
+              hidden
+            >
+              <h3>外观</h3>
+              <p class="settings-description">主题与界面密度</p>
+              <div class="setting-row">
+                <div><strong>主题</strong><span>应用界面配色</span></div>
+                <div class="segmented small" id="themeControl">
+                  <button
+                    class="is-selected"
+                    type="button"
+                    data-theme-value="light"
+                  >
+                    <svg><use href="#i-sun"></use></svg>浅色</button
+                  ><button type="button" data-theme-value="dark">
+                    <svg><use href="#i-moon"></use></svg>深色
+                  </button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div>
+                  <strong>界面密度</strong><span>资源列表和工具栏间距</span>
+                </div>
+                <div class="segmented small" id="densityControl">
+                  <button
+                    class="is-selected"
+                    type="button"
+                    data-density-value="compact"
+                  >
+                    紧凑</button
+                  ><button type="button" data-density-value="comfortable">
+                    舒适
+                  </button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+        <footer class="dialog-footer">
+          <button class="button text-button" type="button" data-close-modal>
+            取消</button
+          ><button
+            class="button primary-button"
+            type="button"
+            id="saveSettings"
+          >
+            <svg><use href="#i-check"></use></svg><span>保存设置</span>
+          </button>
+        </footer>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite">
+      <svg><use href="#i-check"></use></svg><span></span>
+    </div>
+    <script src="app.js"></script>
+  </body>
+</html>

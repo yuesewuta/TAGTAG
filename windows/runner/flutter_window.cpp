@@ -15,8 +15,6 @@
 namespace {
 
 constexpr int kQuickTagHotkeyId = 0x5447;
-constexpr UINT kQuickTagModifiers = MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT;
-constexpr UINT kQuickTagVirtualKey = 'T';
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kTrayCommandShow = 0x5450;
@@ -38,6 +36,26 @@ const std::string* StringArgument(const flutter::MethodCall<flutter::EncodableVa
     return nullptr;
   }
   return std::get_if<std::string>(&iterator->second);
+}
+
+std::optional<int64_t> IntegerArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& call,
+    const char* name) {
+  const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+  if (arguments == nullptr) {
+    return std::nullopt;
+  }
+  const auto iterator = arguments->find(flutter::EncodableValue(name));
+  if (iterator == arguments->end()) {
+    return std::nullopt;
+  }
+  if (const auto* value = std::get_if<int32_t>(&iterator->second)) {
+    return *value;
+  }
+  if (const auto* value = std::get_if<int64_t>(&iterator->second)) {
+    return *value;
+  }
+  return std::nullopt;
 }
 
 std::string HResultDetails(HRESULT status) {
@@ -159,6 +177,19 @@ bool FlutterWindow::OnCreate() {
           result->Success(flutter::EncodableValue(quick_tag_registered_));
           return;
         }
+        if (call.method_name() == "setShortcut") {
+          const auto modifiers = IntegerArgument(call, "modifiers");
+          const auto virtual_key = IntegerArgument(call, "virtualKey");
+          if (!modifiers.has_value() || !virtual_key.has_value() ||
+              *modifiers < 0 || *virtual_key < 0) {
+            result->Error("invalid_arguments", "Invalid Quick Tag shortcut");
+            return;
+          }
+          result->Success(flutter::EncodableValue(SetQuickTagShortcut(
+              static_cast<UINT>(*modifiers),
+              static_cast<UINT>(*virtual_key))));
+          return;
+        }
         result->NotImplemented();
       });
   floating_drop_target_channel_ =
@@ -187,9 +218,31 @@ bool FlutterWindow::OnCreate() {
         }
         result->NotImplemented();
       });
+  close_behavior_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "tagtag/windows_close_behavior",
+          &flutter::StandardMethodCodec::GetInstance());
+  close_behavior_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() == "setCloseToTray") {
+          const auto* close_to_tray = std::get_if<bool>(call.arguments());
+          if (close_to_tray == nullptr) {
+            result->Error("invalid_arguments",
+                          "Close behavior requires a bool value");
+            return;
+          }
+          close_to_tray_ = *close_to_tray;
+          result->Success(flutter::EncodableValue(close_to_tray_));
+          return;
+        }
+        result->NotImplemented();
+      });
   quick_tag_registered_ =
-      RegisterHotKey(GetHandle(), kQuickTagHotkeyId, kQuickTagModifiers,
-                     kQuickTagVirtualKey) != FALSE;
+      RegisterHotKey(GetHandle(), kQuickTagHotkeyId, quick_tag_modifiers_,
+                     quick_tag_virtual_key_) != FALSE;
   if (quick_tag_registered_) {
     quick_tag_window_ = GetHandle();
   }
@@ -219,11 +272,35 @@ void FlutterWindow::OnDestroy() {
   floating_drop_target_channel_.reset();
   quick_tag_channel_.reset();
   recycle_bin_channel_.reset();
+  close_behavior_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
 
   Win32Window::OnDestroy();
+}
+
+bool FlutterWindow::SetQuickTagShortcut(UINT modifiers, UINT virtual_key) {
+  const HWND window = GetHandle();
+  const UINT previous_modifiers = quick_tag_modifiers_;
+  const UINT previous_virtual_key = quick_tag_virtual_key_;
+  if (quick_tag_registered_) {
+    UnregisterHotKey(quick_tag_window_, kQuickTagHotkeyId);
+    quick_tag_registered_ = false;
+  }
+  if (RegisterHotKey(window, kQuickTagHotkeyId, modifiers, virtual_key) !=
+      FALSE) {
+    quick_tag_registered_ = true;
+    quick_tag_window_ = window;
+    quick_tag_modifiers_ = modifiers;
+    quick_tag_virtual_key_ = virtual_key;
+    return true;
+  }
+  quick_tag_registered_ =
+      RegisterHotKey(window, kQuickTagHotkeyId, previous_modifiers,
+                     previous_virtual_key) != FALSE;
+  quick_tag_window_ = quick_tag_registered_ ? window : nullptr;
+  return false;
 }
 
 void FlutterWindow::ShowAndActivate(HWND window) {
@@ -518,7 +595,11 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   if (message == WM_CLOSE) {
-    ShowWindow(hwnd, SW_HIDE);
+    if (close_to_tray_) {
+      ShowWindow(hwnd, SW_HIDE);
+    } else {
+      DestroyWindow(hwnd);
+    }
     return 0;
   }
 

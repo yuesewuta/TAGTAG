@@ -410,3 +410,119 @@
 - 2026-08-11：发布前本地门禁完成：Dart 格式状态无 Git 额外差异，`flutter analyze --no-pub` 零问题，全量测试 76/76，Windows Release 构建成功，必需插件 DLL 打包检查为 GREEN。
 - 2026-08-11：提交 `bda107d feat: add folder tag inheritance` 已推送到 `main`，带说明标签 `v0.7.0` 已推送并触发 GitHub Actions run `31490106702`。
 - 2026-08-11：远端分析、76 项测试、版本一致性校验、Windows 构建、便携包、安装器安装/升级/卸载及 Release 发布全部成功。正式资产为 `TAGTAG-v0.7.0-windows-x64-portable.zip`（13,882,589 字节）和 `TAGTAG-v0.7.0-windows-x64-setup.exe`（11,788,621 字节）。
+- 2026-08-11：阶段 17 启动并完成高级搜索域首轮实现：资源大小与创建时间向标签状态同步，旧状态缺少字段时保持可读；有效标签计算支持显式空间参数。
+- 2026-08-11：搜索页已接入名称、路径、标签名、类型、大小、创建/修改时间及稳定标签实体 ID 的 AND/OR/NOT 组合条件；待整理页可直接切换当前空间和全局作用域。
+- 2026-08-11：`v0.8.0` 发布前定向测试与全量回归通过，当前全量为 80/80，静态分析零问题；等待最终 Windows Release 构建和 GitHub 发布核验。
+- 2026-08-11：`0.8.0+1` 本地 Windows Release 构建成功，必需插件 DLL 打包检查为 GREEN；高级搜索和待整理的实现工单已关闭，远程发布工单保持进行中。
+- 2026-08-11：提交 `db76ba6 feat: add advanced search and global inbox` 已推送到 `main`，带说明标签 `v0.8.0` 已推送并触发 GitHub Actions run `31494152370`。
+- 2026-08-11：`v0.8.0` 远程分析、80 项测试、Windows 构建、便携包、安装器安装/升级/卸载和 Release 发布全部成功。正式资产为便携 ZIP（14,012,648 字节）和安装器（11,879,082 字节）。阶段 17 完成，阶段 18 开始。
+- 2026-08-11：阶段 18 完成标签实体合并、唯一标签位置拆分、继承规则转换、最小上下文日志与逆序撤销；直接标注始终保留原标签位置 ID。
+- 2026-08-11：标签层级已接入合并/拆分命令和影响预览，操作日志分开呈现资源操作与标签操作；领域、UI 定向测试及全量 85/85 通过，静态分析零问题。
+- 2026-08-11：提交 `128ae2c feat: add tag merge and split operations` 和标签 `v0.9.0` 已推送；GitHub Actions run `31496325767` 的分析、85 项测试、Windows 构建、安装/升级/卸载及 Release 发布全部成功。
+- 2026-08-11：`v0.9.0` 正式资产为便携 ZIP（14,035,826 字节）和安装器（11,894,286 字节）。阶段 18 完成，阶段 19 开始。
+- 2026-08-11：阶段 19 的空间可移植性服务首轮静态检查发现 `archive 3.6.1` 不支持 `zipDirectoryAsync(includeDirName:)` 且 `Archive` 无 `closeSync()`；移除无效参数和调用，保留输入流与临时目录清理。
+- 2026-08-11：阶段 19 已完成空间包/模板服务与控制器首轮闭环，覆盖资源 ID、字节、空目录、复用/冲突、SHA-256 篡改、ZIP 路径穿越、持久化重开和模板隔离测试；模板实例化改为生成新的空间、标签与位置身份，资源包继续保留稳定资源 ID。
+- 2026-08-11：`v0.10.0` 本地静态检查、93 项测试、Windows Release 构建和插件打包检查通过；GitHub Actions `31500151356` 完整成功，正式发布便携 ZIP（14,163,967 字节）和安装器 EXE（11,990,782 字节）。阶段 19 完成，按约定在 `v0.10.0` 暂停开发。
+# UI Prototype Session (2026-08-11)
+
+- Status: complete.
+- Read repository agent instructions, issue-tracker conventions, domain-doc conventions, ui-ux-pro-max instructions, and planning-with-files instructions.
+- Error: the previously approved Python path `D:\condaData\condaEnvs\site_safety_cv\python.exe` no longer exists. Resolution: use the interpreter discovered by `Get-Command python` for the recovery and design-system scripts.
+- No production Flutter files have been modified.
+- Audited `CONTEXT.md`, `README.md`, the Flutter application entry point, the main UI composition, controller/model surfaces, and active/future local specs for advanced search, global inbox, tag identity operations, and space portability.
+- Generated and persisted the ui-ux-pro-max master design system, then rejected its misrouted landing-page pattern after a product-specific search.
+- Added `design-system/tagtag/pages/workspace.md` as the evidence-based desktop workspace override.
+- Implemented the isolated interactive prototype in `prototypes/ui-refresh/` with separate HTML, CSS, JavaScript, and usage notes; no production Flutter files were modified.
+- Captured the design-system source of truth in `design-system/tagtag/MASTER.md` and the product-specific desktop workspace override in `design-system/tagtag/pages/workspace.md`.
+- Verified the resource workspace, tag hierarchy, Quick Tag, import, settings, navigation drawer, dark mode, library health, operation log, keyboard dismissal, and reduced-motion behavior in a real browser.
+- Verified 1440, 1024, 768, 375, and 812x375 landscape layouts with no horizontal overflow. Narrow Quick Tag and import flows collapse to one column; table columns reduce according to content priority.
+- Final validation passed: browser console 0 errors / 0 warnings, JavaScript syntax check passed, and Git whitespace check passed. Screenshots are stored in `output/playwright/`.
+
+## UI Prototype Iteration 2 (2026-08-11)
+
+- Started the requested five-point refinement pass on the isolated browser prototype.
+- Recovered planning context and confirmed unrelated Flutter `v0.10.0` work is already present; production files will be left untouched.
+- Located the duplicate top actions, inert space switcher, static tag hierarchy, one-way status drawer handlers, and Windows integration settings panel.
+- Confirmed the interaction design: a native parent selector with cycle prevention, a listbox-style two-space menu, a shared status toggle, and a modifier-required shortcut recorder with inline feedback.
+- Removed the duplicate top status and settings actions so the header action cluster contains only Import.
+- Added a two-space dropdown demo that updates the title bar, breadcrumb, navigation label, and Quick Tag context.
+- Replaced the static tag tree with a data-driven hierarchy, selectable tags, a parent selector, descendant exclusion, immediate re-rendering, path feedback, and responsive scrolling.
+- Changed the persistent library-health control to a true open/close toggle with synchronized `aria-expanded` state.
+- Added a global Quick Tag shortcut recorder, modifier validation, reserved `Ctrl + K` feedback, restore-default behavior, and runtime matching of the selected combination.
+- Next: verify the five interactions and responsive behavior with Playwright, then run final static checks.
+- Playwright desktop pass: the top header contains only Import; the two-option space listbox opens, receives focus, and switches visible context to `团队共享`.
+- Playwright desktop pass: activating `资料库正常` opens the status drawer and marks the trigger expanded; activating it again closes the drawer.
+- Playwright desktop pass: the hierarchy editor is visible in the tag page, follows tree selection, and excludes the selected tag and its descendants from eligible parents.
+- Playwright desktop pass: reassigned `品牌` under `运营`; the tree order, selected parent, success feedback, and right-side path all updated immediately. Captured `output/playwright/iteration-2-tag-hierarchy-1440.png`.
+- Playwright desktop pass: opened Settings from the sole persistent navigation entry and switched to Windows integration for shortcut verification.
+- Playwright desktop pass: recorded `Ctrl + Alt + Y`; the displayed global Quick Tag shortcut updated immediately and recording focus returned to the control.
+- Playwright desktop pass: closed Settings and pressed the newly recorded shortcut; Quick Tag opened with the current `团队共享` context.
+- Began the narrow-window pass at 375x812 after closing the Quick Tag modal.
+- Verified 375px width with no horizontal overflow and captured `output/playwright/iteration-2-tag-hierarchy-375.png`.
+- Visually inspected the desktop and narrow hierarchy screenshots; the editor, selected state, tree indentation, feedback, and top Import-only action remain coherent.
+- Narrow navigation verification found and fixed one accessibility issue: the library-health trigger now has an explicit descriptive accessible name.
+- Narrow settings verification found and fixed missing names on the five icon-only category buttons; explicit labels now survive responsive text hiding.
+- Captured and visually reviewed `output/playwright/iteration-2-settings-hotkey-375.png`; the shortcut editor remains readable and task controls stay within the viewport.
+- Reloaded the prototype at 375px to verify the newly added explicit accessibility labels from a clean state.
+- Clean-state narrow verification passed: only Import remains in the header action cluster, all five settings tabs expose names, no horizontal overflow is present, and the browser console reports 0 errors / 0 warnings.
+- Began the final 812x375 landscape verification required by the UI delivery checklist.
+- First landscape navigation attempt exposed a retained drawer behind the Settings modal. Updated Settings and status-center entry handlers to close responsive navigation before opening; a clean reload and repeat verification is required.
+- Reloaded at 812x375 after the fix; the mobile menu now opens normally without pointer interception.
+- Landscape retry passed: the tag view closes navigation automatically, has no horizontal overflow at 812x375, and is captured in `output/playwright/iteration-2-tag-hierarchy-812x375.png`.
+- UI Prototype Iteration 2 complete. All five requested changes are implemented in the isolated HTML/CSS/JavaScript prototype; final console, syntax, HTTP, whitespace, desktop, portrait, and landscape checks passed.
+
+## Production UI Refresh (2026-08-11)
+
+- Started the production Flutter UI refactor from the approved `prototypes/ui-refresh/` visual system.
+- Added the local production UI specification and three implementation tickets under `.scratch/production-ui-refresh/`.
+- Preserved the confirmed no-inspector, dedicated-search, direct-resource-action, and top-right-space-switching behaviors in the acceptance contract.
+- Rechecked the requested logo source; `C:\Users\zcc\Desktop\LOGO.png` is still absent, so only logo integration is blocked while layout implementation continues.
+- Added centralized production theme tokens using the approved blue/neutral/folder-accent palette and Windows system typography.
+- Rebuilt the production shell with 232px expanded navigation, 72px compact navigation, a context app bar, and top-right space/import/operational commands.
+- Reworked the resource workspace into a stable table surface with page context, direct action icons, tag chips, selection state, and a status bar.
+- Reworked tag hierarchy into a recursive tree plus selected-tag resource pane with counts, descendant scope, and existing merge/split actions.
+- Rebuilt Settings as a categorized desktop dialog for current general, storage, and Windows integration settings only.
+- The first UI contract test run exposed hidden Material ink states under colored boxes; replaced those boxes with Material surfaces and reran successfully.
+- Final local verification so far: static analysis zero issues, targeted application tests 8/8, UI contract tests 3/3, full suite 96/96, Windows Release build successful, and required plugin packaging GREEN.
+- Visually inspected the actual Release application at 1440x900 and 960x720; no navigation, command, table, action, or text overlap was found. Screenshots are in `output/production-ui-refresh-1440.png` and `output/production-ui-refresh-960.png`.
+
+## Exact Prototype Parity Pass (2026-08-11)
+
+- User rejected the compatibility-conservative production refresh and clarified that the HTML prototype is the complete UI and interaction contract.
+- Started a fresh local effort under `.scratch/prototype-parity-ui/` with research, primary workspace, secondary surface, and verification tickets.
+- Production Flutter edits are paused until the HTML/CSS/JavaScript and browser-state audit is complete.
+- Confirmed the prototype source sizes and Playwright prerequisites; began structural DOM inventory.
+- The first DOM inventory command failed because PowerShell parsed the double-quoted regex incorrectly; recorded the failure and switched to a single-quoted pattern.
+## Exact parity continuation (2026-08-11)
+
+- Re-read repository agent rules, domain vocabulary, active planning files, and the UI/Playwright/planning skill instructions.
+- Confirmed branch `main` and preserved the existing dirty worktree as the implementation baseline.
+- Resumed phase 21 with source audit as the next required step before further Flutter edits.
+- Audited `index.html` lines 820-1614 and captured the complete tag workbench, inspector, status drawer, Quick Tag, import, settings, drag overlay, and toast structure.
+- Audited `index.html` lines 1-819 and captured the custom title bar, persistent navigation, main command hierarchy, resource table semantics, row variants, and empty state.
+- Audited CSS root tokens and primary shell/navigation dimensions; captured exact colors, typography, icon sizing, radii, density behavior, and responsive-rule locations.
+- Audited CSS for command bars, resource table, inspector, tag workbench, status drawer, and shared dialog scaffolding.
+- Completed the CSS audit for import/settings internals, drag/drop and toast feedback, all four responsive breakpoints, dark mode, density, and reduced-motion behavior.
+- Completed the JavaScript audit and captured all view, selection, inspector, space, hierarchy, modal, import, settings, shortcut, drawer, drag/drop, keyboard, and responsive state transitions.
+- Filled the command-strip audit gap and inventoried the production Flutter UI surface, file size, existing component boundaries, dialogs, and business-action entry points.
+- Re-read the parity acceptance spec/map, confirmed Playwright prerequisites, and inventoried all existing prototype reference screenshots.
+- Visually inspected the authoritative main 1440/1024, Quick Tag 1440, and Settings 1440 screenshots and recorded alignment, density, surface, modal, and responsive behavior.
+- Verified Playwright CLI execution. The first clean-state open failed only because `file://` is blocked; switched the replay plan to a local HTTP server and recorded the failure to avoid repeating it.
+- Started a local prototype server on port 4173, opened it in a named Playwright session, and captured a clean desktop accessibility snapshot.
+- Read the production home state/root build and first resource/search regions; identified reusable business callbacks and the exact root layout/search/multiselect structures to replace.
+- Audited controller view/search/selection/effective-tag/hierarchy APIs and confirmed the parity state can be composed without changing the domain persistence model.
+- Read the page-level workspace design override and current theme, then confirmed a dedicated window-frame dependency is needed for true custom-title-bar parity.
+- Resolved prototype audit ticket 01 and unblocked primary workspace ticket 02. Identified obsolete UI tests that intentionally assert the opposite of the new inspector/search parity contract.
+- Began implementation: added dark-token support, declared the minimal window manager dependency, and initialized a 1280x800 borderless Windows window with 320x520 minimum size.
+- Ran dependency resolution successfully; recorded the Windows symlink warning for immediate build verification/fallback.
+- Implemented the first production parity shell: custom title bar, 232/72/overlay navigation, responsive main workspace, persistent query/selection command bar, table, resource inspector, hierarchy editor, status drawer, drag overlay, and direct resource menus.
+- Added safe tag-placement reparenting with self/descendant/cross-space validation and wired it to the hierarchy editor.
+- Formatted the implementation and ran `flutter analyze`; compilation passed and only legacy unused/style lints remained for cleanup.
+
+## Exact parity implementation resumed (2026-08-12)
+
+- Recovered the active file plan and re-read the repository issue/domain rules plus the complete `ui-ux-pro-max` delivery checklist; prototype source remains the sole visual and interaction authority.
+- Recorded the prior harmless tooling error: `findings.md` and `progress.md` were accidentally passed to `dart format`, which only reported parse errors and did not modify either Markdown file.
+- Extended the existing version-1 preferences document with backwards-compatible optional values for close behavior, startup view, appearance, density, and the Quick Tag shortcut.
+- Added runtime Windows Quick Tag re-registration with rollback to the previous binding when a requested key combination is unavailable.
+- Formatted the changed Dart files and reran static analysis: zero issues.

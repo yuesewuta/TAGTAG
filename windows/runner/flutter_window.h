@@ -40,6 +40,7 @@ class FlutterWindow : public Win32Window {
   void ShowTrayMenu(HWND window);
   void HandleTrayCommand(HWND window, UINT command);
   bool SetFloatingDropTargetEnabled(bool enabled);
+  bool SetQuickTagShortcut(UINT modifiers, UINT virtual_key);
   bool CreateFloatingDropTarget();
   void DestroyFloatingDropTarget();
   void ShowFloatingDropTarget();
@@ -59,13 +60,18 @@ class FlutterWindow : public Win32Window {
       quick_tag_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       floating_drop_target_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      close_behavior_channel_;
   bool quick_tag_registered_ = false;
   HWND quick_tag_window_ = nullptr;
+  UINT quick_tag_modifiers_ = 0x0002 | 0x0004 | 0x4000;
+  UINT quick_tag_virtual_key_ = 'T';
   bool tray_icon_added_ = false;
   HWND tray_window_ = nullptr;
   bool floating_drop_target_enabled_ = false;
   HWND floating_drop_target_window_ = nullptr;
   bool floating_drop_target_class_registered_ = false;
+  bool close_to_tray_ = true;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

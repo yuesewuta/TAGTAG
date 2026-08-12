@@ -77,20 +77,27 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('备份与空间迁移'));
+    // Backup and space portability commands live in the settings dialog.
+    await tester.tap(find.byKey(const ValueKey('nav-设置')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('存储与备份'));
     await tester.pumpAndSettle();
     expect(find.text('创建完整备份'), findsOneWidget);
-    expect(find.text('从完整备份恢复'), findsOneWidget);
-    expect(find.text('导出当前空间包'), findsOneWidget);
+    expect(find.text('从备份恢复'), findsOneWidget);
+    expect(find.text('导出空间包'), findsOneWidget);
     expect(find.text('导入空间包'), findsOneWidget);
-    expect(find.text('导出当前空间模板'), findsOneWidget);
-    expect(find.text('从空间模板新建'), findsOneWidget);
-    await tester.tapAt(const Offset(80, 160));
+    expect(find.text('导出空间模板'), findsOneWidget);
+    expect(find.text('导入空间模板'), findsOneWidget);
+    await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
 
-    final consistencyButton = find.byTooltip('一致性告警');
-    await _pumpUntilFound(tester, consistencyButton);
-    await tester.tap(consistencyButton);
+    // The health button opens the status drawer; its consistency row opens
+    // the full consistency dialog.
+    final healthButton = find.byTooltip('2 个一致性告警');
+    await _pumpUntilFound(tester, healthButton);
+    await tester.tap(healthButton);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('打开完整告警列表进行处理'));
     await tester.pumpAndSettle();
 
     expect(find.text('发现未受管内容'), findsOneWidget);
@@ -143,10 +150,11 @@ void main() {
         channel.codec.encodeMethodCall(const MethodCall('activated')),
         (_) {},
       );
-      final quickTagDialog = find.text('为 1 项添加标签');
+      final quickTagDialog = find.text('快速标注');
       await _pumpUntilFound(tester, quickTagDialog);
 
-      expect(quickTagDialog, findsOneWidget);
+      expect(quickTagDialog, findsWidgets);
+      expect(find.text('1 个资源 · 设计空间'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -197,14 +205,12 @@ void main() {
       channel.codec.encodeMethodCall(const MethodCall('activated')),
       (_) {},
     );
-    await _pumpUntilFound(tester, find.text('为 1 项添加标签'));
+    await _pumpUntilFound(tester, find.text('快速标注'));
 
-    await tester.tap(find.text('项目').first);
-    await tester.pump();
-
+    // The dialog exposes the folder's current inheritance rule.
     expect(find.text('子项继承'), findsOneWidget);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
-    expect(find.text('添加标签'), findsOneWidget);
+    expect(find.text('添加 1 个标签'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
@@ -239,16 +245,18 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.text('高级筛选'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('最小大小'), findsOneWidget);
-    expect(find.text('创建起始'), findsOneWidget);
-    await tester.tap(find.widgetWithText(FilterChip, '项目'));
+    // The dedicated search page exposes tag-condition chips and a reset.
+    await tester.tap(find.widgetWithText(OutlinedButton, '项目'));
     await tester.pump();
     expect(
       controller.searchConditionForTag('tag-project'),
       SearchTagCondition.and,
+    );
+    await tester.tap(find.text('清除'));
+    await tester.pump();
+    expect(
+      controller.searchConditionForTag('tag-project'),
+      SearchTagCondition.none,
     );
 
     controller.showInboxResources();
@@ -293,18 +301,24 @@ void main() {
       ),
     );
     await tester.pump();
-    await tester.tap(find.byTooltip('操作日志'));
+    // The operation log is reachable from the status drawer's history tab.
+    await tester.tap(find.byTooltip('资料库正常，上次扫描 1 分钟前'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('操作日志'));
+    await tester.pump();
+    await _pumpUntilFound(tester, find.text('查看完整操作日志'));
+    await tester.tap(find.text('查看完整操作日志'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('标签操作'));
     await tester.pump();
 
-    expect(find.text('拆分标签'), findsOneWidget);
-    expect(find.textContaining('拆分 1 个位置'), findsOneWidget);
+    expect(find.text('拆分标签'), findsWidgets);
+    expect(find.textContaining('拆分 1 个位置'), findsWidgets);
     await tester.tap(find.byTooltip('撤销此标签操作'));
     await tester.pumpAndSettle();
 
     expect(controller.tagOperations.single.undoneAt, isNotNull);
-    expect(find.text('已撤销'), findsOneWidget);
+    expect(find.text('已撤销'), findsWidgets);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -338,47 +352,29 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('设计'));
+    controller.selectPlacement('place-project-design-reference');
     await tester.pumpAndSettle();
-
-    final reusedReference = find.text('参考').first;
-    final reusedTile = find.ancestor(
-      of: reusedReference,
-      matching: find.byType(ListTile),
-    );
-    await tester.tap(
-      find.descendant(of: reusedTile.first, matching: find.byTooltip('标签操作')),
-    );
+    await tester.tap(find.byTooltip('标签操作'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('拆分位置...'));
+    await tester.tap(find.text('拆分标签'));
     await tester.pumpAndSettle();
 
     expect(find.text('拆分标签位置'), findsOneWidget);
-    expect(find.text('影响预览'), findsOneWidget);
+    expect(find.text('影响预览'), findsWidgets);
     expect(find.text('1 个标签位置'), findsOneWidget);
     expect(find.byType(CheckboxListTile), findsNWidgets(2));
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('阅读'));
+    controller.selectPlacement('place-personal-reading-reference-independent');
     await tester.pumpAndSettle();
-    final independentReference = find.text('参考').last;
-    final independentTile = find.ancestor(
-      of: independentReference,
-      matching: find.byType(ListTile),
-    );
-    await tester.tap(
-      find.descendant(
-        of: independentTile.first,
-        matching: find.byTooltip('标签操作'),
-      ),
-    );
+    await tester.tap(find.byTooltip('标签操作'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('合并到...'));
+    await tester.tap(find.text('合并标签'));
     await tester.pumpAndSettle();
 
     expect(find.text('合并标签实体'), findsOneWidget);
-    expect(find.text('影响预览'), findsOneWidget);
+    expect(find.text('影响预览'), findsWidgets);
     expect(find.text('确认合并'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -387,6 +383,10 @@ void main() {
   testWidgets('Explorer Quick Tag activation opens the import-and-tag dialog', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(1100, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     const channel = MethodChannel('tagtag/windows_quick_tag');
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -427,9 +427,10 @@ void main() {
       (_) {},
     );
 
-    final importDialog = find.text('导入并标注 1 个资源');
+    final importDialog = find.text('导入并标注');
     await _pumpUntilFound(tester, importDialog);
     expect(importDialog, findsOneWidget);
+    expect(find.textContaining('1 个资源'), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

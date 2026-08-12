@@ -105,6 +105,22 @@ class TagTagController extends ChangeNotifier {
     return matches.isEmpty ? null : matches.first;
   }
 
+  int visibleResourceCountForSpace(String? spaceId) {
+    if (spaceId == null) return 0;
+    return _state.resourceIdsForSpace(spaceId).length;
+  }
+
+  int inboxCountForSpace(String? spaceId) {
+    if (spaceId == null) return 0;
+    return _state
+        .resourceIdsForSpace(spaceId)
+        .where(
+          (resourceId) =>
+              effectiveTagsForResourceInSpace(resourceId, spaceId).isEmpty,
+        )
+        .length;
+  }
+
   List<TagDomainOperation> get tagOperations {
     final operations = _state.tagOperations.toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -127,6 +143,10 @@ class TagTagController extends ChangeNotifier {
     if (_state.activeSpaceId == null && _state.spaces.isNotEmpty) {
       _state = _state.copyWith(activeSpaceId: _state.spaces.first.id);
     }
+    activeView = switch (_preferences.startupView) {
+      'inbox' => ResourceView.inbox,
+      _ => ResourceView.all,
+    };
     await _syncManagedResources();
     notifyListeners();
   }
@@ -134,10 +154,20 @@ class TagTagController extends ChangeNotifier {
   Future<void> updatePreferences({
     bool? moveImportsByDefault,
     bool? floatingDropTargetEnabled,
+    bool? closeToTray,
+    String? startupView,
+    String? appearanceTheme,
+    String? interfaceDensity,
+    String? quickTagShortcut,
   }) async {
     _preferences = _preferences.copyWith(
       moveImportsByDefault: moveImportsByDefault,
       floatingDropTargetEnabled: floatingDropTargetEnabled,
+      closeToTray: closeToTray,
+      startupView: startupView,
+      appearanceTheme: appearanceTheme,
+      interfaceDensity: interfaceDensity,
+      quickTagShortcut: quickTagShortcut,
     );
     notifyListeners();
     await _persistTagDomainMetadata();
@@ -170,6 +200,16 @@ class TagTagController extends ChangeNotifier {
       return const [];
     }
     return _state.placementsForSpace(spaceId);
+  }
+
+  List<TagSpace> spacesForResource(String resourceId) {
+    final spaceIds = _state.memberships
+        .where((membership) => membership.resourceId == resourceId)
+        .map((membership) => membership.spaceId)
+        .toSet();
+    return _state.spaces
+        .where((space) => spaceIds.contains(space.id))
+        .toList();
   }
 
   List<TagResource> get visibleResources {
@@ -638,6 +678,60 @@ class TagTagController extends ChangeNotifier {
             .toList(),
       ),
     );
+  }
+
+  Future<void> reparentPlacement(
+    String placementId,
+    String? nextParentId,
+  ) async {
+    final spaceId = _requireActiveSpace();
+    final placement = placementsInActiveSpace.singleWhere(
+      (item) => item.id == placementId,
+    );
+    if (placement.parentId == nextParentId) {
+      return;
+    }
+    if (nextParentId == placementId) {
+      throw StateError('标签位置不能作为自己的上级');
+    }
+    if (nextParentId != null) {
+      final parent = placementsInActiveSpace.singleWhere(
+        (item) => item.id == nextParentId,
+      );
+      if (parent.spaceId != spaceId) {
+        throw StateError('只能选择当前标签空间内的上级标签');
+      }
+      var cursor = parent.parentId;
+      while (cursor != null) {
+        if (cursor == placementId) {
+          throw StateError('不能把标签移动到自己的子级下');
+        }
+        final matches = placementsInActiveSpace.where(
+          (item) => item.id == cursor,
+        );
+        cursor = matches.isEmpty ? null : matches.single.parentId;
+      }
+    }
+    final siblings = _state.childrenOf(nextParentId, spaceId);
+    await _update(
+      _state.copyWith(
+        placements: _state.placements
+            .map(
+              (item) => item.id == placementId
+                  ? TagPlacement(
+                      id: item.id,
+                      spaceId: item.spaceId,
+                      tagId: item.tagId,
+                      parentId: nextParentId,
+                      sortOrder: siblings.length,
+                    )
+                  : item,
+            )
+            .toList(),
+      ),
+    );
+    activePlacementId = placementId;
+    notifyListeners();
   }
 
   TagIdentityImpact previewTagMerge({

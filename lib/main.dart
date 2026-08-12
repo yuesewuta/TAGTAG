@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'data/local_store.dart';
 import 'platform/windows_file_actions.dart';
@@ -11,6 +12,7 @@ import 'state/tagtag_controller.dart';
 import 'storage/library_locator.dart';
 import 'storage/managed_library.dart';
 import 'ui/home_screen.dart';
+import 'ui/tagtag_theme.dart';
 
 typedef StorageRootPicker = Future<String?> Function();
 
@@ -18,8 +20,23 @@ Future<String?> _pickStorageRoot() {
   return getDirectoryPath(confirmButtonText: '选择此文件夹');
 }
 
-void main(List<String> arguments) {
+Future<void> main(List<String> arguments) async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) {
+    await windowManager.ensureInitialized();
+    const options = WindowOptions(
+      size: Size(1280, 800),
+      minimumSize: Size(320, 360),
+      center: true,
+      title: 'TAGTAG',
+      titleBarStyle: TitleBarStyle.hidden,
+      windowButtonVisibility: false,
+    );
+    await windowManager.waitUntilReadyToShow(options, () async {
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
   runApp(
     TagTagApp(
       locator: LibraryLocator(),
@@ -33,7 +50,10 @@ List<String> _quickTagPathsFromArguments(List<String> arguments) {
   if (flagIndex == -1) {
     return const [];
   }
-  return arguments.skip(flagIndex + 1).where((path) => path.isNotEmpty).toList();
+  return arguments
+      .skip(flagIndex + 1)
+      .where((path) => path.isNotEmpty)
+      .toList();
 }
 
 class TagTagApp extends StatefulWidget {
@@ -193,45 +213,10 @@ class _TagTagAppState extends State<TagTagApp> {
 
   @override
   Widget build(BuildContext context) {
-    const seed = Color(0xff0f766e);
-    final scheme =
-        ColorScheme.fromSeed(
-          seedColor: seed,
-          brightness: Brightness.light,
-        ).copyWith(
-          surface: const Color(0xfff8fafc),
-          surfaceContainer: const Color(0xfff1f5f9),
-          outlineVariant: const Color(0xffd7dee8),
-        );
     return MaterialApp(
       title: 'TAGTAG',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: scheme,
-        scaffoldBackgroundColor: const Color(0xfff8fafc),
-        useMaterial3: true,
-        dividerTheme: const DividerThemeData(
-          color: Color(0xffd7dee8),
-          thickness: 1,
-          space: 1,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: Color(0xffcbd5e1)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: const BorderSide(color: Color(0xffcbd5e1)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: scheme.primary, width: 1.5),
-          ),
-        ),
-      ),
+      theme: buildTagTagTheme(),
       home: _buildHome(),
     );
   }
