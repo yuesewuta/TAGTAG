@@ -117,60 +117,57 @@ class _TagTagHomeState extends State<TagTagHome> {
           const SingleActivator(LogicalKeyboardKey.keyK, control: true):
               _focusSearch,
         },
-        child: Focus(
-          autofocus: true,
-          child: Scaffold(
-            body: DropTarget(
-              enable: !_importDialogOpen,
-              onDragEntered: (_) => setState(() => _dragging = true),
-              onDragExited: (_) => setState(() => _dragging = false),
-              onDragDone: (details) {
-                setState(() {
-                  _dragging = false;
-                  _draggingCount = details.files.length;
-                });
-                unawaited(
-                  _handleDroppedPaths(details.files.map((item) => item.path)),
-                );
-              },
-              child: AnimatedBuilder(
-                animation: controller,
-                builder: (context, _) => PrototypeWorkspace(
-                  controller: controller,
-                  searchController: _searchController,
-                  searchFocusNode: _searchFocusNode,
-                  comfortableDensity: _interfaceDensity == 'comfortable',
-                  dragging: _dragging,
-                  draggingCount: _draggingCount,
-                  consistencyFindings: _consistencyFindings,
-                  onQuickTag: _showQuickTag,
-                  onImport: () => _chooseImportSource(_ImportSourceKind.files),
-                  onImportFolder: () =>
-                      _chooseImportSource(_ImportSourceKind.folder),
-                  onCreateSpace: _showCreateSpace,
-                  onOpenConsistency: _showConsistencyFindings,
-                  onSettings: _showSettings,
-                  onOperationLog: _showOperationLog,
-                  onCreateBackup: _createBackup,
-                  onOpenResource: _openResource,
-                  onRevealResource: _revealResource,
-                  onAddTag: _addTagToResource,
-                  onClearTags: _clearTagsForResource,
-                  onRestoreResource: _restoreResource,
-                  onMoveResource: _moveResourceToSpecifiedPath,
-                  onRecycleResource: _recycleResource,
-                  onCreateTag: (parentId) => _showCreateTag(parentId: parentId),
-                  onEditTag: (placementId) async {
-                    controller.selectPlacement(placementId);
-                    await _editActiveTag();
-                  },
-                  onMergeTag: _showMergeTag,
-                  onSplitTag: _showSplitTag,
-                  onDeleteTag: (placementId) async {
-                    controller.selectPlacement(placementId);
-                    await _deleteActiveTag();
-                  },
-                ),
+        child: Scaffold(
+          body: DropTarget(
+            enable: !_importDialogOpen,
+            onDragEntered: (_) => setState(() => _dragging = true),
+            onDragExited: (_) => setState(() => _dragging = false),
+            onDragDone: (details) {
+              setState(() {
+                _dragging = false;
+                _draggingCount = details.files.length;
+              });
+              unawaited(
+                _handleDroppedPaths(details.files.map((item) => item.path)),
+              );
+            },
+            child: AnimatedBuilder(
+              animation: controller,
+              builder: (context, _) => PrototypeWorkspace(
+                controller: controller,
+                searchController: _searchController,
+                searchFocusNode: _searchFocusNode,
+                comfortableDensity: _interfaceDensity == 'comfortable',
+                dragging: _dragging,
+                draggingCount: _draggingCount,
+                consistencyFindings: _consistencyFindings,
+                onQuickTag: _showQuickTag,
+                onImport: () => _chooseImportSource(_ImportSourceKind.files),
+                onImportFolder: () =>
+                    _chooseImportSource(_ImportSourceKind.folder),
+                onCreateSpace: _showCreateSpace,
+                onOpenConsistency: _showConsistencyFindings,
+                onSettings: _showSettings,
+                onOperationLog: _showOperationLog,
+                onCreateBackup: _createBackup,
+                onOpenResource: _openResource,
+                onRevealResource: _revealResource,
+                onAddTag: _addTagToResource,
+                onClearTags: _clearTagsForResource,
+                onRestoreResource: _restoreResource,
+                onMoveResource: _moveResourceToSpecifiedPath,
+                onRecycleResource: _recycleResource,
+                onCreateTag: (parentId) => _showCreateTag(parentId: parentId),
+                onEditTag: (placementId) async {
+                  controller.selectPlacement(placementId);
+                  await _editActiveTag();
+                },
+                onMergeTag: _showMergeTag,
+                onSplitTag: _showSplitTag,
+                onDeleteTag: (placementId) async {
+                  controller.selectPlacement(placementId);
+                  await _deleteActiveTag();
+                },
               ),
             ),
           ),
@@ -2323,4 +2320,3 @@ LogicalKeyboardKey? _logicalKeyForShortcutLabel(String label) {
   }
   return null;
 }
-

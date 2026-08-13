@@ -38,7 +38,10 @@ Future<T?> showPrototypeDialog<T>({
         curve: const Cubic(0.2, 0.7, 0.2, 1),
       );
       return FadeTransition(
-        opacity: CurvedAnimation(parent: animation, curve: const Interval(0, 0.9)),
+        opacity: CurvedAnimation(
+          parent: animation,
+          curve: const Interval(0, 0.9),
+        ),
         child: SlideTransition(
           position: Tween<Offset>(
             begin: const Offset(0, 0.018),
@@ -956,6 +959,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
             builder: (context, constraints) {
               final compact = constraints.maxWidth < 720;
               return Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(
                     width: compact ? 62 : 200,
@@ -1027,7 +1031,10 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
         Text(title.$2, style: TextStyle(fontSize: 11, color: _muted(context))),
         const SizedBox(height: 17),
         ...switch (_section) {
-          PrototypeSettingsSection.general => _generalSettings(compact),
+          PrototypeSettingsSection.general => _generalSettings(
+            context,
+            compact,
+          ),
           PrototypeSettingsSection.imports => _importSettings(compact),
           PrototypeSettingsSection.storage => _storageSettings(compact),
           PrototypeSettingsSection.windows => _windowsSettings(compact),
@@ -1037,7 +1044,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
     );
   }
 
-  List<Widget> _generalSettings(bool compact) => [
+  List<Widget> _generalSettings(BuildContext context, bool compact) => [
     _SettingRow(
       title: '关闭主窗口时',
       subtitle: 'TAGTAG 继续在系统托盘运行',
@@ -1053,16 +1060,28 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
       title: '启动视图',
       subtitle: '每次打开 TAGTAG 时显示',
       compact: compact,
-      trailing: DropdownButton<String>(
-        value: _startupView,
-        items: const [
-          DropdownMenuItem(value: 'last', child: Text('上次使用的视图')),
-          DropdownMenuItem(value: 'all', child: Text('全部资源')),
-          DropdownMenuItem(value: 'inbox', child: Text('待整理')),
-        ],
-        onChanged: (value) {
-          if (value != null) setState(() => _startupView = value);
-        },
+      trailing: Container(
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          border: Border.all(color: Theme.of(context).colorScheme.outline),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: DropdownButtonHideUnderline(
+          child: DropdownButton<String>(
+            value: _startupView,
+            isDense: true,
+            items: const [
+              DropdownMenuItem(value: 'last', child: Text('上次使用的视图')),
+              DropdownMenuItem(value: 'all', child: Text('全部资源')),
+              DropdownMenuItem(value: 'inbox', child: Text('待整理')),
+            ],
+            onChanged: (value) {
+              if (value != null) setState(() => _startupView = value);
+            },
+          ),
+        ),
       ),
     ),
   ];
@@ -1612,88 +1631,88 @@ class PrototypeDialogFrame extends StatelessWidget {
       width: compact ? media.size.width : width,
       height: fixedHeight?.clamp(0, availableHeight),
       child: Column(
-        mainAxisSize:
-            fixedHeight == null ? MainAxisSize.min : MainAxisSize.max,
+        mainAxisSize: fixedHeight == null ? MainAxisSize.min : MainAxisSize.max,
         children: [
           Container(
-              constraints: const BoxConstraints(minHeight: 72),
-              padding: EdgeInsets.symmetric(
-                horizontal: media.size.width <= 440 ? 12 : 16,
-                vertical: 12,
-              ),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: _border(context))),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: _soft(context),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Icon(icon, size: 19, color: _primary(context)),
-                  ),
-                  const SizedBox(width: 11),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: _muted(context),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '关闭',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close, size: 18),
-                  ),
-                ],
-              ),
+            constraints: const BoxConstraints(minHeight: 72),
+            padding: EdgeInsets.symmetric(
+              horizontal: media.size.width <= 440 ? 12 : 16,
+              vertical: 12,
             ),
-            if (fixedHeight == null)
-              Flexible(child: body)
-            else
-              Expanded(child: body),
-            Container(
-              constraints: const BoxConstraints(minHeight: 58),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: _subtle(context),
-                border: Border(top: BorderSide(color: _border(context))),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  for (final action in actions) ...[
-                    action,
-                    const SizedBox(width: 8),
-                  ],
-                ],
-              ),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: _border(context))),
             ),
-          ],
-        ),
-      );
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _primary(context),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 19,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 11, color: _muted(context)),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: '关闭',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close, size: 18),
+                ),
+              ],
+            ),
+          ),
+          if (fixedHeight == null)
+            Flexible(child: body)
+          else
+            Expanded(child: body),
+          Container(
+            constraints: const BoxConstraints(minHeight: 58),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: _subtle(context),
+              border: Border(top: BorderSide(color: _border(context))),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                for (final action in actions) ...[
+                  action,
+                  const SizedBox(width: 8),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
     return Dialog(
       alignment: compact ? Alignment.bottomCenter : Alignment.center,
       insetPadding: compact ? EdgeInsets.zero : const EdgeInsets.all(24),
