@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import '../models/tag_models.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
+import 'prototype_dialogs.dart';
 import 'tagtag_theme.dart';
 
 typedef ResourceAction = Future<void> Function(TagResource resource);
@@ -104,14 +105,35 @@ class PrototypeWorkspace extends StatefulWidget {
   State<PrototypeWorkspace> createState() => _PrototypeWorkspaceState();
 }
 
-class _PrototypeWorkspaceState extends State<PrototypeWorkspace> {
+class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
+    with SingleTickerProviderStateMixin {
   String? _inspectedResourceId;
   bool _navigationOpen = false;
   bool _inspectorOpen = false;
   bool _statusOpen = false;
   _StatusTab _statusTab = _StatusTab.health;
+  late final AnimationController _statusAnimation = AnimationController(
+    vsync: this,
+  );
 
   TagTagController get controller => widget.controller;
+
+  @override
+  void dispose() {
+    _statusAnimation.dispose();
+    super.dispose();
+  }
+
+  void _setStatusOpen(bool open) {
+    if (open == _statusOpen) return;
+    setState(() => _statusOpen = open);
+    _statusAnimation.duration = _motionDuration(context, 220);
+    if (open) {
+      _statusAnimation.forward();
+    } else {
+      _statusAnimation.reverse();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -128,205 +150,222 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace> {
               _WindowBar(spaceName: controller.activeSpace?.name ?? '标签空间'),
               Expanded(
                 child: LayoutBuilder(
-              builder: (context, constraints) {
-                final width = constraints.maxWidth;
-                final wide = width >= 1280;
-                final rail = width >= 960 && !wide;
-                final navigationWidth = wide ? 232.0 : 72.0;
-                final inspector = _inspectedResource();
-                return Stack(
-                  children: [
-                    Row(
+                  builder: (context, constraints) {
+                    final width = constraints.maxWidth;
+                    final wide = width >= 1280;
+                    final rail = width >= 960 && !wide;
+                    final navigationWidth = wide ? 232.0 : 72.0;
+                    final inspector = _inspectedResource();
+                    return Stack(
                       children: [
-                        if (width >= 960)
-                          SizedBox(
-                            key: const ValueKey('primary-navigation'),
-                            width: navigationWidth,
-                            child: _Navigation(
-                              controller: controller,
-                              collapsed: rail,
-                              findings: widget.consistencyFindings.length,
-                              onNavigate: _navigate,
-                              onCreateSpace: widget.onCreateSpace,
-                              onSettings: widget.onSettings,
-                              onStatus: () => setState(() {
-                                _navigationOpen = false;
-                                _statusOpen = !_statusOpen;
-                              }),
-                              statusExpanded: _statusOpen,
-                            ),
-                          ),
-                        Expanded(
-                          child: _MainWorkspace(
-                            controller: controller,
-                            searchController: widget.searchController,
-                            searchFocusNode: widget.searchFocusNode,
-                            comfortableDensity: widget.comfortableDensity,
-                            windowWidth: width,
-                            inspectedResourceId: inspector?.id,
-                            onInspect: (resource) => setState(() {
-                              _inspectedResourceId = resource.id;
-                              if (!wide) _inspectorOpen = true;
-                            }),
-                            onToggleInspector: () => setState(
-                              () => _inspectorOpen = !_inspectorOpen,
-                            ),
-                            onOpenNavigation: () =>
-                                setState(() => _navigationOpen = true),
-                            onQuickTag: _quickTag,
-                            onImport: widget.onImport,
-                            onImportFolder: widget.onImportFolder,
-                            onOpenResource: widget.onOpenResource,
-                            onRevealResource: widget.onRevealResource,
-                            onAddTag: widget.onAddTag,
-                            onClearTags: widget.onClearTags,
-                            onRestoreResource: widget.onRestoreResource,
-                            onMoveResource: widget.onMoveResource,
-                            onRecycleResource: widget.onRecycleResource,
-                            onCreateTag: widget.onCreateTag,
-                            onEditTag: widget.onEditTag,
-                            onMergeTag: widget.onMergeTag,
-                            onSplitTag: widget.onSplitTag,
-                            onDeleteTag: widget.onDeleteTag,
-                          ),
-                        ),
-                        if (wide)
-                          SizedBox(
-                            width: 300,
-                            child: _Inspector(
-                              controller: controller,
-                              resource: inspector,
-                              onClose: null,
-                              onOpen: widget.onOpenResource,
-                              onReveal: widget.onRevealResource,
-                              onEditTags: widget.onAddTag,
-                            ),
-                          ),
-                      ],
-                    ),
-                    if (width < 960) ...[
-                      Positioned.fill(
-                        child: IgnorePointer(
-                          ignoring: !_navigationOpen,
-                          child: ExcludeSemantics(
-                            excluding: !_navigationOpen,
-                            child: GestureDetector(
-                              onTap: () =>
-                                  setState(() => _navigationOpen = false),
-                              child: AnimatedOpacity(
-                                opacity: _navigationOpen ? 1 : 0,
-                                duration: _motionDuration(context, 200),
-                                curve: _motionCurve,
-                                child: ColoredBox(
-                                  color: Colors.black.withValues(alpha: 0.40),
+                        Row(
+                          children: [
+                            if (width >= 960)
+                              SizedBox(
+                                key: const ValueKey('primary-navigation'),
+                                width: navigationWidth,
+                                child: _Navigation(
+                                  controller: controller,
+                                  collapsed: rail,
+                                  findings: widget.consistencyFindings.length,
+                                  onNavigate: _navigate,
+                                  onCreateSpace: widget.onCreateSpace,
+                                  onSettings: widget.onSettings,
+                                  onStatus: () {
+                                    _navigationOpen = false;
+                                    _setStatusOpen(!_statusOpen);
+                                  },
+                                  statusExpanded: _statusOpen,
                                 ),
                               ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Positioned(
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: 232,
-                        child: IgnorePointer(
-                          ignoring: !_navigationOpen,
-                          child: ExcludeSemantics(
-                            excluding: !_navigationOpen,
-                            child: AnimatedSlide(
-                              offset: _navigationOpen
-                                  ? Offset.zero
-                                  : const Offset(-1.05, 0),
-                              duration: _motionDuration(context, 200),
-                              curve: _motionCurve,
-                              child: _Navigation(
+                            Expanded(
+                              child: _MainWorkspace(
                                 controller: controller,
-                                collapsed: false,
-                                findings: widget.consistencyFindings.length,
-                                onNavigate: _navigate,
-                                onCreateSpace: widget.onCreateSpace,
-                                onSettings: widget.onSettings,
-                                onStatus: () => setState(() {
-                                  _navigationOpen = false;
-                                  _statusOpen = !_statusOpen;
+                                searchController: widget.searchController,
+                                searchFocusNode: widget.searchFocusNode,
+                                comfortableDensity: widget.comfortableDensity,
+                                windowWidth: width,
+                                inspectedResourceId: inspector?.id,
+                                onInspect: (resource) => setState(() {
+                                  _inspectedResourceId = resource.id;
+                                  if (!wide) _inspectorOpen = true;
                                 }),
-                                statusExpanded: _statusOpen,
+                                onToggleInspector: () => setState(
+                                  () => _inspectorOpen = !_inspectorOpen,
+                                ),
+                                onOpenNavigation: () =>
+                                    setState(() => _navigationOpen = true),
+                                onQuickTag: _quickTag,
+                                onImport: widget.onImport,
+                                onImportFolder: widget.onImportFolder,
+                                onOpenResource: widget.onOpenResource,
+                                onRevealResource: widget.onRevealResource,
+                                onAddTag: widget.onAddTag,
+                                onClearTags: widget.onClearTags,
+                                onRestoreResource: widget.onRestoreResource,
+                                onMoveResource: widget.onMoveResource,
+                                onRecycleResource: widget.onRecycleResource,
+                                onCreateTag: widget.onCreateTag,
+                                onEditTag: widget.onEditTag,
+                                onMergeTag: widget.onMergeTag,
+                                onSplitTag: widget.onSplitTag,
+                                onDeleteTag: widget.onDeleteTag,
                               ),
                             ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    if (!wide)
-                      Positioned(
-                        right: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: width < 440 ? width : 320,
-                        child: IgnorePointer(
-                          ignoring: !_inspectorOpen,
-                          child: ExcludeSemantics(
-                            excluding: !_inspectorOpen,
-                            child: AnimatedSlide(
-                              offset: _inspectorOpen
-                                  ? Offset.zero
-                                  : const Offset(1.05, 0),
-                              duration: _motionDuration(context, 200),
-                              curve: _motionCurve,
-                              child: Material(
-                                elevation: 18,
-                                color: _palette(context).surfaceSubtle,
+                            if (wide)
+                              SizedBox(
+                                width: 300,
                                 child: _Inspector(
                                   controller: controller,
                                   resource: inspector,
-                                  onClose: () =>
-                                      setState(() => _inspectorOpen = false),
+                                  onClose: null,
                                   onOpen: widget.onOpenResource,
                                   onReveal: widget.onRevealResource,
                                   onEditTags: widget.onAddTag,
                                 ),
                               ),
+                          ],
+                        ),
+                        if (width < 960) ...[
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              ignoring: !_navigationOpen,
+                              child: ExcludeSemantics(
+                                excluding: !_navigationOpen,
+                                child: GestureDetector(
+                                  onTap: () =>
+                                      setState(() => _navigationOpen = false),
+                                  child: AnimatedOpacity(
+                                    opacity: _navigationOpen ? 1 : 0,
+                                    duration: _motionDuration(context, 200),
+                                    curve: _motionCurve,
+                                    child: ColoredBox(
+                                      color: Colors.black.withValues(
+                                        alpha: 0.40,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    Positioned(
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: width < 420 ? width : 420,
-                      child: IgnorePointer(
-                        ignoring: !_statusOpen,
-                        child: ExcludeSemantics(
-                          excluding: !_statusOpen,
-                          child: AnimatedSlide(
-                            offset: _statusOpen
-                                ? Offset.zero
-                                : const Offset(1.05, 0),
-                            duration: _motionDuration(context, 220),
-                            curve: _motionCurve,
-                            child: _StatusDrawer(
-                              controller: controller,
-                              findings: widget.consistencyFindings,
-                              selectedTab: _statusTab,
-                              onTabSelected: (tab) =>
-                                  setState(() => _statusTab = tab),
-                              onClose: () =>
-                                  setState(() => _statusOpen = false),
-                              onCreateBackup: widget.onCreateBackup,
-                              onOpenFullLog: widget.onOperationLog,
-                              onOpenConsistency: widget.onOpenConsistency,
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: 232,
+                            child: IgnorePointer(
+                              ignoring: !_navigationOpen,
+                              child: ExcludeSemantics(
+                                excluding: !_navigationOpen,
+                                child: AnimatedSlide(
+                                  offset: _navigationOpen
+                                      ? Offset.zero
+                                      : const Offset(-1.05, 0),
+                                  duration: _motionDuration(context, 200),
+                                  curve: _motionCurve,
+                                  child: _Navigation(
+                                    controller: controller,
+                                    collapsed: false,
+                                    findings: widget.consistencyFindings.length,
+                                    onNavigate: _navigate,
+                                    onCreateSpace: widget.onCreateSpace,
+                                    onSettings: widget.onSettings,
+                                    onStatus: () {
+                                      _navigationOpen = false;
+                                      _setStatusOpen(!_statusOpen);
+                                    },
+                                    statusExpanded: _statusOpen,
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
+                        ],
+                        if (!wide)
+                          Positioned(
+                            right: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: width < 440 ? width : 320,
+                            child: IgnorePointer(
+                              ignoring: !_inspectorOpen,
+                              child: ExcludeSemantics(
+                                excluding: !_inspectorOpen,
+                                child: AnimatedSlide(
+                                  offset: _inspectorOpen
+                                      ? Offset.zero
+                                      : const Offset(1.05, 0),
+                                  duration: _motionDuration(context, 200),
+                                  curve: _motionCurve,
+                                  child: Material(
+                                    elevation: 18,
+                                    color: _palette(context).surfaceSubtle,
+                                    child: _Inspector(
+                                      controller: controller,
+                                      resource: inspector,
+                                      onClose: () => setState(
+                                        () => _inspectorOpen = false,
+                                      ),
+                                      onOpen: widget.onOpenResource,
+                                      onReveal: widget.onRevealResource,
+                                      onEditTags: widget.onAddTag,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: width < 420 ? width : 420,
+                          child: AnimatedBuilder(
+                            animation: _statusAnimation,
+                            child: IgnorePointer(
+                              ignoring: !_statusOpen,
+                              child: ExcludeSemantics(
+                                excluding: !_statusOpen,
+                                child: _StatusDrawer(
+                                  controller: controller,
+                                  findings: widget.consistencyFindings,
+                                  selectedTab: _statusTab,
+                                  onTabSelected: (tab) =>
+                                      setState(() => _statusTab = tab),
+                                  onClose: () => _setStatusOpen(false),
+                                  onCreateBackup: widget.onCreateBackup,
+                                  onOpenFullLog: widget.onOperationLog,
+                                  onOpenConsistency: widget.onOpenConsistency,
+                                ),
+                              ),
+                            ),
+                            builder: (context, child) {
+                              if (_statusAnimation.isDismissed) {
+                                return const SizedBox.shrink();
+                              }
+                              return SlideTransition(
+                                position:
+                                    Tween<Offset>(
+                                      begin: const Offset(1.05, 0),
+                                      end: Offset.zero,
+                                    ).animate(
+                                      CurvedAnimation(
+                                        parent: _statusAnimation,
+                                        curve: _motionCurve,
+                                        reverseCurve: _motionCurve,
+                                      ),
+                                    ),
+                                child: child!,
+                              );
+                            },
+                          ),
                         ),
-                      ),
-                    ),
-                    if (widget.dragging)
-                      _DropOverlay(count: widget.draggingCount),
-                  ],
-                );
-              },
+                        if (widget.dragging)
+                          _DropOverlay(count: widget.draggingCount),
+                      ],
+                    );
+                  },
                 ),
               ),
             ],
@@ -338,7 +377,7 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace> {
 
   void _closeTopLayer() {
     if (_statusOpen) {
-      setState(() => _statusOpen = false);
+      _setStatusOpen(false);
     } else if (_inspectorOpen) {
       setState(() => _inspectorOpen = false);
     } else if (_navigationOpen) {
@@ -485,8 +524,8 @@ class _CaptionButton extends StatelessWidget {
     final width = windowWidth <= 720
         ? 34.0
         : windowWidth <= 959
-            ? 40.0
-            : 46.0;
+        ? 40.0
+        : 46.0;
     return Tooltip(
       message: tooltip,
       child: InkWell(
@@ -721,10 +760,7 @@ class _SpaceMenuState extends State<_SpaceMenu> {
             showPrototypeToast(context, '已切换到“${space.name}”');
           }
         },
-        offset: Offset(
-          widget.collapsed ? 57 : 0,
-          widget.collapsed ? -38 : 42,
-        ),
+        offset: Offset(widget.collapsed ? 57 : 0, widget.collapsed ? -38 : 42),
         constraints: const BoxConstraints(minWidth: 220, maxWidth: 260),
         itemBuilder: (context) => [
           for (final space in controller.state.spaces)
@@ -788,8 +824,7 @@ class _SpaceMenuState extends State<_SpaceMenu> {
         child: Container(
           key: const ValueKey('space-switcher'),
           height: 38,
-          padding:
-              EdgeInsets.symmetric(horizontal: widget.collapsed ? 0 : 10),
+          padding: EdgeInsets.symmetric(horizontal: widget.collapsed ? 0 : 10),
           decoration: BoxDecoration(
             color: palette.surface,
             border: Border.all(color: palette.borderStrong),
@@ -878,8 +913,7 @@ class _NavButtonState extends State<_NavButton> {
   @override
   Widget build(BuildContext context) {
     final palette = _palette(context);
-    final foreground =
-        widget.selected ? palette.primary : palette.textMuted;
+    final foreground = widget.selected ? palette.primary : palette.textMuted;
     final button = FocusableActionDetector(
       onShowFocusHighlight: (value) => setState(() => _focused = value),
       child: InkWell(
@@ -887,11 +921,9 @@ class _NavButtonState extends State<_NavButton> {
         borderRadius: BorderRadius.circular(5),
         child: Container(
           height: 40,
-          padding:
-              EdgeInsets.symmetric(horizontal: widget.collapsed ? 0 : 10),
+          padding: EdgeInsets.symmetric(horizontal: widget.collapsed ? 0 : 10),
           decoration: BoxDecoration(
-            color:
-                widget.selected ? palette.primarySoft : Colors.transparent,
+            color: widget.selected ? palette.primarySoft : Colors.transparent,
             borderRadius: BorderRadius.circular(5),
             border: _focused
                 ? Border.all(color: palette.primary, width: 2)
@@ -1008,7 +1040,9 @@ class _HealthButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(5),
         child: Container(
           height: 50,
-          padding: collapsed ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 8),
+          padding: collapsed
+              ? EdgeInsets.zero
+              : const EdgeInsets.symmetric(horizontal: 8),
           decoration: BoxDecoration(
             color: expanded ? palette.primarySoft : Colors.transparent,
             borderRadius: BorderRadius.circular(5),
@@ -1153,18 +1187,62 @@ class _MainWorkspace extends StatelessWidget {
                     ),
                   ),
                 ),
-                _PrototypeButton(
-                  icon: Icons.file_upload_outlined,
-                  label: windowWidth < 440 ? null : '导入',
-                  primary: true,
-                  tooltip: '导入文件',
-                  onPressed: () => unawaited(onImport()),
-                ),
-                const SizedBox(width: 6),
-                _SmallIconButton(
-                  icon: Icons.create_new_folder_outlined,
-                  tooltip: '导入文件夹',
-                  onPressed: () => unawaited(onImportFolder()),
+                PopupMenuButton<_ImportMenuAction>(
+                  tooltip: '导入',
+                  onSelected: (action) => unawaited(
+                    action == _ImportMenuAction.files
+                        ? onImport()
+                        : onImportFolder(),
+                  ),
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _ImportMenuAction.files,
+                      child: _MenuLabel(Icons.note_add_outlined, '导入文件'),
+                    ),
+                    PopupMenuItem(
+                      value: _ImportMenuAction.folder,
+                      child: _MenuLabel(
+                        Icons.create_new_folder_outlined,
+                        '导入文件夹',
+                      ),
+                    ),
+                  ],
+                  child: Container(
+                    height: 34,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: windowWidth < 440 ? 8 : 12,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.file_upload_outlined,
+                          size: 17,
+                          color: Theme.of(context).colorScheme.onPrimary,
+                        ),
+                        if (windowWidth >= 440) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            '导入',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Theme.of(context).colorScheme.onPrimary,
+                            ),
+                          ),
+                          const SizedBox(width: 2),
+                          Icon(
+                            Icons.arrow_drop_down,
+                            size: 16,
+                            color: Theme.of(context).colorScheme.onPrimary,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -1240,6 +1318,11 @@ class _MainWorkspace extends StatelessWidget {
               _SearchFilterStrip(
                 controller: controller,
                 windowWidth: windowWidth,
+                onClearSearch: () {
+                  searchController.clear();
+                  controller.setSearchTerm('');
+                  controller.clearSearchFilters();
+                },
               ),
             if (view == ResourceView.inbox)
               _InboxScopeStrip(
@@ -2071,7 +2154,10 @@ class _Inspector extends StatelessWidget {
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  item.path,
+                                  _displayLocation(
+                                    item.path,
+                                    controller.storageRoot?.path,
+                                  ),
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 12,
@@ -2246,12 +2332,6 @@ class _TagWorkbench extends StatefulWidget {
 }
 
 class _TagWorkbenchState extends State<_TagWorkbench> {
-  String? _pendingParentId;
-  String? _editingPlacementId;
-  bool _parentChanged = false;
-  String _feedback = '修改后会立即更新左侧层级列表';
-  bool _success = false;
-
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
@@ -2262,32 +2342,12 @@ class _TagWorkbenchState extends State<_TagWorkbench> {
     final active = selected.isEmpty
         ? (placements.isEmpty ? null : placements.first)
         : selected.first;
-    if (active?.id != _editingPlacementId) {
-      _editingPlacementId = active?.id;
-      _pendingParentId = active?.parentId;
-      _parentChanged = false;
-      _feedback = '修改后会立即更新左侧层级列表';
-      _success = false;
-    }
     if (active != null && controller.activePlacementId == null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) controller.selectPlacement(active.id);
       });
     }
-    final tree = _TagTreePanel(
-      controller: controller,
-      selected: active,
-      pendingParentId: _pendingParentId,
-      feedback: _feedback,
-      success: _success,
-      onParentChanged: (value) => setState(() {
-        _pendingParentId = value;
-        _parentChanged = true;
-        _success = false;
-        _feedback = '点击“应用层级”确认修改';
-      }),
-      onApply: active == null ? null : () => _apply(active),
-    );
+    final tree = _TagTreePanel(controller: controller, selected: active);
     if (widget.windowWidth < 720) return tree;
     return Row(
       children: [
@@ -2310,90 +2370,69 @@ class _TagWorkbenchState extends State<_TagWorkbench> {
       ],
     );
   }
-
-  Future<void> _apply(TagPlacement active) async {
-    try {
-      final nextParentId = _parentChanged
-          ? _pendingParentId
-          : active.parentId;
-      if (active.parentId == nextParentId) {
-        setState(() {
-          _success = false;
-          _feedback = '层级未发生变化';
-        });
-        return;
-      }
-      await widget.controller.reparentPlacement(active.id, nextParentId);
-      if (!mounted) return;
-      setState(() {
-        _pendingParentId = nextParentId;
-        _parentChanged = false;
-        _success = true;
-        _feedback = '已更新：${widget.controller.pathOf(active.id)}';
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '“${widget.controller.tagForPlacement(active).name}”的层级已更新',
-          ),
-        ),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _success = false;
-        _feedback = '$error';
-      });
-    }
-  }
 }
 
 class _TagTreePanel extends StatefulWidget {
-  const _TagTreePanel({
-    required this.controller,
-    required this.selected,
-    required this.pendingParentId,
-    required this.feedback,
-    required this.success,
-    required this.onParentChanged,
-    required this.onApply,
-  });
+  const _TagTreePanel({required this.controller, required this.selected});
 
   final TagTagController controller;
   final TagPlacement? selected;
-  final String? pendingParentId;
-  final String feedback;
-  final bool success;
-  final ValueChanged<String?> onParentChanged;
-  final VoidCallback? onApply;
 
   @override
   State<_TagTreePanel> createState() => _TagTreePanelState();
 }
 
 class _TagTreePanelState extends State<_TagTreePanel> {
-  final FocusNode _parentSelectorFocus = FocusNode();
+  static const int _maxIndentDepth = 6;
 
-  @override
-  void dispose() {
-    _parentSelectorFocus.dispose();
-    super.dispose();
+  late final Set<String> _expandedIds = {
+    for (final root in widget.controller.rootPlacements)
+      if (widget.controller.childrenOf(root.id).isNotEmpty) root.id,
+  };
+
+  void _expandToLevels(int levels) {
+    final controller = widget.controller;
+    final expanded = <String>{};
+    void walk(TagPlacement placement, int depth) {
+      if (depth >= levels - 1) return;
+      final children = controller.childrenOf(placement.id);
+      if (children.isEmpty) return;
+      expanded.add(placement.id);
+      for (final child in children) {
+        walk(child, depth + 1);
+      }
+    }
+
+    for (final root in controller.rootPlacements) {
+      walk(root, 0);
+    }
+    setState(() => _expandedIds
+      ..clear()
+      ..addAll(expanded));
   }
 
-  void _focusParentSelector() {
-    _parentSelectorFocus.requestFocus();
+  void _expandAll() => _expandToLevels(1 << 30);
+
+  Set<String> _ancestorsOf(TagPlacement? placement) {
+    final ancestors = <String>{};
+    final byId = {
+      for (final item in widget.controller.state.placements) item.id: item,
+    };
+    var current = placement == null ? null : byId[placement.id];
+    while (current?.parentId != null) {
+      final parent = byId[current!.parentId];
+      if (parent == null || !ancestors.add(parent.id)) break;
+      current = parent;
+    }
+    return ancestors;
   }
 
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
     final palette = _palette(context);
-    final selected = widget.selected;
-    final selectedId = selected?.id;
-    final descendants = selectedId == null
-        ? <String>{}
-        : _placementDescendants(controller, selectedId);
-    final parentValue = widget.pendingParentId;
+    // The selected placement must stay visible even after a global collapse.
+    final expanded = {..._expandedIds, ..._ancestorsOf(widget.selected)};
     return Container(
       decoration: BoxDecoration(
         border: Border(right: BorderSide(color: palette.border)),
@@ -2430,10 +2469,23 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                     ],
                   ),
                 ),
-                _SmallIconButton(
-                  icon: Icons.account_tree_outlined,
-                  tooltip: '设置标签层级',
-                  onPressed: _focusParentSelector,
+                PopupMenuButton<int>(
+                  tooltip: '展开层级',
+                  icon: const Icon(Icons.unfold_more, size: 18),
+                  onSelected: (levels) {
+                    if (levels <= 0) {
+                      _expandAll();
+                    } else {
+                      _expandToLevels(levels);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(value: 1, child: Text('仅显示顶层')),
+                    PopupMenuItem(value: 2, child: Text('展开到第 2 层')),
+                    PopupMenuItem(value: 3, child: Text('展开到第 3 层')),
+                    PopupMenuItem(value: 5, child: Text('展开到第 5 层')),
+                    PopupMenuItem(value: 0, child: Text('全部展开')),
+                  ],
                 ),
               ],
             ),
@@ -2447,114 +2499,14 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                     controller: controller,
                     placement: root,
                     depth: 0,
+                    expandedIds: expanded,
+                    maxIndentDepth: _maxIndentDepth,
+                    onToggle: (id) => setState(() {
+                      if (!_expandedIds.remove(id)) {
+                        _expandedIds.add(id);
+                      }
+                    }),
                   ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
-            decoration: BoxDecoration(
-              color: palette.surfaceSubtle,
-              border: Border(top: BorderSide(color: palette.border)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 30,
-                      height: 30,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: palette.primarySoft,
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Icon(
-                        Icons.account_tree_outlined,
-                        size: 16,
-                        color: palette.primary,
-                      ),
-                    ),
-                    const SizedBox(width: 9),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '设置标签层级',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          Text(
-                            selected == null
-                                ? '请选择标签'
-                                : '已选择“${controller.tagForPlacement(selected).name}”',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: palette.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '上级标签',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: palette.textMuted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                DropdownButtonFormField<String>(
-                  key: ValueKey('${selected?.id}|$parentValue'),
-                  focusNode: _parentSelectorFocus,
-                  initialValue: parentValue ?? '',
-                  isExpanded: true,
-                  items: [
-                    const DropdownMenuItem(value: '', child: Text('无上级（顶层）')),
-                    for (final placement in controller.placementsInActiveSpace)
-                      if (placement.id != selectedId &&
-                          !descendants.contains(placement.id))
-                        DropdownMenuItem(
-                          value: placement.id,
-                          child: Text(
-                            controller.pathOf(placement.id),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                  ],
-                  onChanged: selected == null
-                      ? null
-                      : (value) => widget.onParentChanged(
-                          value == null || value.isEmpty ? null : value,
-                        ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  widget.feedback,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: widget.success
-                        ? TagTagColors.success
-                        : palette.textFaint,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: widget.onApply,
-                    icon: const Icon(Icons.account_tree_outlined, size: 16),
-                    label: const Text('应用层级'),
-                  ),
-                ),
               ],
             ),
           ),
@@ -2569,10 +2521,16 @@ class _TagTreeNode extends StatelessWidget {
     required this.controller,
     required this.placement,
     required this.depth,
+    required this.expandedIds,
+    required this.maxIndentDepth,
+    required this.onToggle,
   });
   final TagTagController controller;
   final TagPlacement placement;
   final int depth;
+  final Set<String> expandedIds;
+  final int maxIndentDepth;
+  final ValueChanged<String> onToggle;
 
   @override
   Widget build(BuildContext context) {
@@ -2580,6 +2538,8 @@ class _TagTreeNode extends StatelessWidget {
     final tag = controller.tagForPlacement(placement);
     final children = controller.childrenOf(placement.id);
     final selected = controller.activePlacementId == placement.id;
+    final expanded = expandedIds.contains(placement.id);
+    final indent = 7 + (depth > maxIndentDepth ? maxIndentDepth : depth) * 20;
     return Column(
       children: [
         InkWell(
@@ -2587,7 +2547,7 @@ class _TagTreeNode extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           child: Container(
             height: 36,
-            padding: EdgeInsets.only(left: 7 + depth * 20, right: 7),
+            padding: EdgeInsets.only(left: indent.toDouble(), right: 7),
             decoration: BoxDecoration(
               color: selected ? palette.primarySoft : Colors.transparent,
               borderRadius: BorderRadius.circular(4),
@@ -2598,7 +2558,19 @@ class _TagTreeNode extends StatelessWidget {
                   width: 18,
                   child: children.isEmpty
                       ? null
-                      : const Icon(Icons.expand_more, size: 14),
+                      : GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => onToggle(placement.id),
+                          child: Tooltip(
+                            message: expanded ? '收起' : '展开',
+                            child: Icon(
+                              expanded
+                                  ? Icons.expand_more
+                                  : Icons.chevron_right,
+                              size: 14,
+                            ),
+                          ),
+                        ),
                 ),
                 Container(
                   width: 8,
@@ -2628,12 +2600,16 @@ class _TagTreeNode extends StatelessWidget {
             ),
           ),
         ),
-        for (final child in children)
-          _TagTreeNode(
-            controller: controller,
-            placement: child,
-            depth: depth + 1,
-          ),
+        if (expanded)
+          for (final child in children)
+            _TagTreeNode(
+              controller: controller,
+              placement: child,
+              depth: depth + 1,
+              expandedIds: expandedIds,
+              maxIndentDepth: maxIndentDepth,
+              onToggle: onToggle,
+            ),
       ],
     );
   }
@@ -2712,7 +2688,7 @@ class _TagResultPanel extends StatelessWidget {
                     Text(
                       sameTagPlacements.length > 1
                           ? '唯一标签 · ${sameTagPlacements.length} 个位置共享同一资源集合'
-                          : '层级位置 可在左侧修改上级标签',
+                          : '层级位置 · 可在“标签操作”中更改上级标签',
                       style: TextStyle(fontSize: 11, color: palette.textMuted),
                     ),
                   ],
@@ -2729,6 +2705,8 @@ class _TagResultPanel extends StatelessWidget {
                       unawaited(onCreateTag(item.id));
                     case _TagMenuAction.edit:
                       unawaited(onEditTag(item.id));
+                    case _TagMenuAction.reparent:
+                      unawaited(_reparent(context, item));
                     case _TagMenuAction.merge:
                       unawaited(onMergeTag(item.id));
                     case _TagMenuAction.split:
@@ -2749,6 +2727,10 @@ class _TagResultPanel extends StatelessWidget {
                   PopupMenuItem(
                     value: _TagMenuAction.edit,
                     child: Text('编辑标签'),
+                  ),
+                  PopupMenuItem(
+                    value: _TagMenuAction.reparent,
+                    child: Text('更改上级标签…'),
                   ),
                   PopupMenuItem(
                     value: _TagMenuAction.merge,
@@ -2853,15 +2835,34 @@ class _TagResultPanel extends StatelessWidget {
       ],
     );
   }
+
+  Future<void> _reparent(BuildContext context, TagPlacement placement) async {
+    final updated = await showReparentTagDialog(
+      context,
+      controller: controller,
+      placement: placement,
+    );
+    if (updated == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
+          ),
+        ),
+      );
+    }
+  }
 }
 
 class _SearchFilterStrip extends StatelessWidget {
   const _SearchFilterStrip({
     required this.controller,
     required this.windowWidth,
+    required this.onClearSearch,
   });
   final TagTagController controller;
   final double windowWidth;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -2901,10 +2902,7 @@ class _SearchFilterStrip extends StatelessWidget {
             _FilterChip(controller: controller, tag: tag),
             const SizedBox(width: 8),
           ],
-          TextButton(
-            onPressed: controller.clearSearchFilters,
-            child: const Text('清除'),
-          ),
+          TextButton(onPressed: onClearSearch, child: const Text('清除')),
         ],
       ),
     );
@@ -3263,9 +3261,7 @@ class _HealthPanel extends StatelessWidget {
                 title: findings.isEmpty
                     ? '${controller.state.resources.length} 个资源已核对'
                     : '${findings.length} 个一致性告警',
-                subtitle: findings.isEmpty
-                    ? '没有孤立内容或缺失资源'
-                    : '打开完整告警列表进行处理',
+                subtitle: findings.isEmpty ? '没有孤立内容或缺失资源' : '打开完整告警列表进行处理',
               ),
             ),
           ),
@@ -3292,10 +3288,7 @@ class _HealthPanel extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '已使用 ${_formatBytes(controller.state.resources.fold<int>(
-                    0,
-                    (sum, item) => sum + (item.sizeBytes ?? 0),
-                  ))}',
+                  '已使用 ${_formatBytes(controller.state.resources.fold<int>(0, (sum, item) => sum + (item.sizeBytes ?? 0)))}',
                   style: TextStyle(
                     fontSize: 11,
                     color: _palette(context).textFaint,
@@ -3409,7 +3402,8 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                   undone: entry.undone,
                   undoing: _undoingId == entry.id,
                   showConnector: index < entries.take(8).length - 1,
-                  onUndo: entry.undone ||
+                  onUndo:
+                      entry.undone ||
                           _undoingId != null ||
                           entry.tagOperation && entry.id != latestActiveTagId
                       ? null
@@ -3629,24 +3623,33 @@ class _HistoryEntry {
 
   factory _HistoryEntry.managed(ManagedOperation operation) {
     final (icon, title) = switch (operation.type) {
-      ManagedOperationType.importCopy =>
-        (Icons.content_copy_outlined, '复制导入资源'),
-      ManagedOperationType.importMove =>
-        (Icons.drive_file_move_outline, '移动导入资源'),
-      ManagedOperationType.exitRestore =>
-        (Icons.restore, '恢复原路径并退出管理'),
-      ManagedOperationType.exitMove =>
-        (Icons.drive_file_move_outline, '移动到指定位置并退出'),
-      ManagedOperationType.exitRecycle =>
-        (Icons.delete_outline, '移入回收站并退出'),
-      ManagedOperationType.takeover =>
-        (Icons.add_task_outlined, '接管未受管内容'),
-      ManagedOperationType.untrackedMoveOut =>
-        (Icons.drive_file_move_outline, '移出未受管内容'),
-      ManagedOperationType.externalMoveAccept =>
-        (Icons.link_outlined, '接受外部移动'),
-      ManagedOperationType.externalMoveRestore =>
-        (Icons.settings_backup_restore, '恢复记录路径'),
+      ManagedOperationType.importCopy => (
+        Icons.content_copy_outlined,
+        '复制导入资源',
+      ),
+      ManagedOperationType.importMove => (
+        Icons.drive_file_move_outline,
+        '移动导入资源',
+      ),
+      ManagedOperationType.exitRestore => (Icons.restore, '恢复原路径并退出管理'),
+      ManagedOperationType.exitMove => (
+        Icons.drive_file_move_outline,
+        '移动到指定位置并退出',
+      ),
+      ManagedOperationType.exitRecycle => (Icons.delete_outline, '移入回收站并退出'),
+      ManagedOperationType.takeover => (Icons.add_task_outlined, '接管未受管内容'),
+      ManagedOperationType.untrackedMoveOut => (
+        Icons.drive_file_move_outline,
+        '移出未受管内容',
+      ),
+      ManagedOperationType.externalMoveAccept => (
+        Icons.link_outlined,
+        '接受外部移动',
+      ),
+      ManagedOperationType.externalMoveRestore => (
+        Icons.settings_backup_restore,
+        '恢复记录路径',
+      ),
     };
     return _HistoryEntry(
       id: operation.id,
@@ -3842,7 +3845,9 @@ class _MenuLabel extends StatelessWidget {
 
 enum _ResourceMenuAction { reveal, addTag, clearTags, restore, move, recycle }
 
-enum _TagMenuAction { addRoot, addChild, edit, merge, split, delete }
+enum _ImportMenuAction { files, folder }
+
+enum _TagMenuAction { addRoot, addChild, edit, reparent, merge, split, delete }
 
 class _Palette {
   const _Palette({
@@ -3954,6 +3959,21 @@ String _spaceNames(TagTagController controller, String resourceId) {
   return spaces.map((space) => space.name).join('、');
 }
 
+/// Inspector location line: prototype shows "存储根 / Design / Brand"
+/// (the containing folder, prefixed with the storage root).
+String _displayLocation(String value, String? storageRoot) {
+  final parent = path.dirname(value);
+  final root = storageRoot;
+  if (root != null &&
+      (parent == root ||
+          parent.startsWith('$root\\') ||
+          parent.startsWith('$root/'))) {
+    if (parent == root) return '存储根';
+    return '存储根 / ${path.split(parent.substring(root.length + 1)).join(' / ')}';
+  }
+  return parent;
+}
+
 String _displayParent(String value, String? storageRoot) {
   final parent = path.dirname(value);
   final root = storageRoot;
@@ -3983,4 +4003,134 @@ Set<String> _placementDescendants(
 
   visit(placementId);
   return result;
+}
+
+/// Opens the reparent dialog for [placement] and reports whether the
+/// hierarchy was actually updated.
+Future<bool?> showReparentTagDialog(
+  BuildContext context, {
+  required TagTagController controller,
+  required TagPlacement placement,
+}) {
+  return showPrototypeDialog<bool>(
+    context: context,
+    builder: (context) =>
+        _ReparentTagDialog(controller: controller, placement: placement),
+  );
+}
+
+class _ReparentTagDialog extends StatefulWidget {
+  const _ReparentTagDialog({required this.controller, required this.placement});
+
+  final TagTagController controller;
+  final TagPlacement placement;
+
+  @override
+  State<_ReparentTagDialog> createState() => _ReparentTagDialogState();
+}
+
+class _ReparentTagDialogState extends State<_ReparentTagDialog> {
+  late String? _pendingParentId = widget.placement.parentId;
+  String? _error;
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = widget.controller;
+    final placement = widget.placement;
+    final tag = controller.tagForPlacement(placement);
+    final descendants = _placementDescendants(controller, placement.id);
+    final changed = _pendingParentId != placement.parentId;
+    return PrototypeDialogFrame(
+      width: 480,
+      desktopHeight: null,
+      icon: Icons.account_tree_outlined,
+      title: '更改上级标签',
+      subtitle: '调整“${tag.name}”在标签层级中的位置',
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '当前位置：${controller.pathOf(placement.id)}',
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              '上级标签',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 5),
+            DropdownButtonFormField<String>(
+              key: ValueKey('${placement.id}|$_pendingParentId'),
+              initialValue: _pendingParentId ?? '',
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem(value: '', child: Text('无上级（顶层）')),
+                for (final candidate in controller.placementsInActiveSpace)
+                  if (candidate.id != placement.id &&
+                      !descendants.contains(candidate.id))
+                    DropdownMenuItem(
+                      value: candidate.id,
+                      child: Text(
+                        controller.pathOf(candidate.id),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+              ],
+              onChanged: (value) => setState(() {
+                _pendingParentId = value == null || value.isEmpty
+                    ? null
+                    : value;
+                _error = null;
+              }),
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                _error!,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+            const SizedBox(height: 14),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: changed ? _apply : null,
+          child: const Text('应用'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _apply() async {
+    try {
+      await widget.controller.reparentPlacement(
+        widget.placement.id,
+        _pendingParentId,
+      );
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _error = '$error');
+      }
+    }
+  }
 }

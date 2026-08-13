@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tagtag/data/local_store.dart';
 import 'package:tagtag/models/tag_models.dart';
@@ -26,11 +27,18 @@ void main() {
     );
     expect(find.text('本地资料库'), findsWidgets);
     expect(find.bySemanticsLabel('TAGTAG 标志'), findsWidgets);
-    expect(find.byTooltip('导入文件'), findsOneWidget);
-    expect(find.byTooltip('导入文件夹'), findsOneWidget);
+    expect(find.byTooltip('导入'), findsOneWidget);
     expect(find.byTooltip('切换标签空间'), findsOneWidget);
     expect(find.text('资源详情'), findsOneWidget);
     expect(find.byType(TextField), findsOneWidget);
+
+    // The merged import entry offers both source kinds.
+    await tester.tap(find.byTooltip('导入'));
+    await tester.pumpAndSettle();
+    expect(find.text('导入文件'), findsOneWidget);
+    expect(find.text('导入文件夹'), findsOneWidget);
+    await tester.tapAt(const Offset(8, 400));
+    await tester.pumpAndSettle();
 
     // The space switcher keeps the create-space entry point.
     await tester.tap(find.byKey(const ValueKey('space-switcher')));
@@ -92,18 +100,37 @@ void main() {
     await _pumpWorkspace(tester, fixture.controller);
 
     expect(find.text('标签层级'), findsWidgets);
-    expect(find.text('设置标签层级'), findsOneWidget);
-    expect(find.text('上级标签'), findsOneWidget);
-    expect(find.text('应用层级'), findsOneWidget);
+    expect(find.byTooltip('展开层级'), findsOneWidget);
 
     await tester.tap(find.text('设计'));
     await tester.pumpAndSettle();
     expect(find.text('设计'), findsWidgets);
-    expect(find.text('已选择“设计”'), findsOneWidget);
 
-    // The hierarchy shortcut button focuses the parent selector.
-    await tester.tap(find.byTooltip('设置标签层级'));
+    // Reparenting now lives in the per-tag action menu.
+    await tester.tap(find.byTooltip('标签操作'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('更改上级标签…'));
+    await tester.pumpAndSettle();
+    expect(find.text('更改上级标签'), findsOneWidget);
+    expect(find.text('上级标签'), findsOneWidget);
+    expect(find.textContaining('当前位置：'), findsOneWidget);
+    expect(find.text('应用'), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    // The expansion control collapses and re-expands the tree.
+    expect(find.text('阅读'), findsOneWidget);
+    await tester.tap(find.byTooltip('展开层级'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('仅显示顶层'));
+    await tester.pumpAndSettle();
+    expect(find.text('阅读'), findsNothing);
+    expect(find.text('个人'), findsOneWidget);
+    await tester.tap(find.byTooltip('展开层级'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('全部展开'));
+    await tester.pumpAndSettle();
+    expect(find.text('阅读'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const ValueKey('nav-设置')));
@@ -125,6 +152,57 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('悬浮接收目标'), findsOneWidget);
     expect(find.text('Ctrl + Shift + T'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Ctrl+K opens the search view with a focused query field', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyK);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    expect(fixture.controller.activeView, ResourceView.search);
+    final field = find.widgetWithText(TextField, '搜索名称、路径或标签');
+    expect(field, findsOneWidget);
+    expect(tester.widget<TextField>(field).focusNode?.hasFocus, isTrue);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('Escape closes the status drawer before anything else', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    await tester.tap(find.text('资料库正常'));
+    await tester.pumpAndSettle();
+    expect(find.text('资料库状态'), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.text('资料库状态'), findsNothing);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
