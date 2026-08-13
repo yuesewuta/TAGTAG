@@ -2385,10 +2385,38 @@ class _TagTreePanel extends StatefulWidget {
 class _TagTreePanelState extends State<_TagTreePanel> {
   static const int _maxIndentDepth = 6;
 
+  String? _draggingId;
+
   late final Set<String> _expandedIds = {
     for (final root in widget.controller.rootPlacements)
       if (widget.controller.childrenOf(root.id).isNotEmpty) root.id,
   };
+
+  void _dropOn(TagPlacement dragged, String? newParentId) {
+    if (dragged.parentId == newParentId) return;
+    // reparentPlacement validates and updates state synchronously, then
+    // persists asynchronously; surface persistence/validation errors late.
+    unawaited(
+      widget.controller.reparentPlacement(dragged.id, newParentId).catchError((
+        error,
+      ) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('调整标签层级失败：$error')));
+        }
+      }),
+    );
+    setState(() {
+      if (newParentId != null) _expandedIds.add(newParentId);
+    });
+    widget.controller.selectPlacement(dragged.id);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已更新：${widget.controller.pathOf(dragged.id)}'),
+      ),
+    );
+  }
 
   void _expandToLevels(int levels) {
     final controller = widget.controller;
@@ -2506,6 +2534,47 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                         _expandedIds.add(id);
                       }
                     }),
+                    onDrop: (dragged, target) =>
+                        _dropOn(dragged, target.id),
+                    onDragStateChange: (id) =>
+                        setState(() => _draggingId = id),
+                  ),
+                if (_draggingId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: DragTarget<TagPlacement>(
+                      onWillAcceptWithDetails: (details) =>
+                          details.data.parentId != null,
+                      onAcceptWithDetails: (details) =>
+                          _dropOn(details.data, null),
+                      builder: (context, candidates, rejected) {
+                        final highlighted = candidates.isNotEmpty;
+                        return Container(
+                          height: 40,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: highlighted
+                                ? palette.primarySoft
+                                : Colors.transparent,
+                            border: Border.all(
+                              color: highlighted
+                                  ? palette.primary
+                                  : palette.border,
+                            ),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '拖到此处设为顶层',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: highlighted
+                                  ? palette.primary
+                                  : palette.textFaint,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
               ],
             ),
@@ -2524,6 +2593,8 @@ class _TagTreeNode extends StatelessWidget {
     required this.expandedIds,
     required this.maxIndentDepth,
     required this.onToggle,
+    required this.onDrop,
+    required this.onDragStateChange,
   });
   final TagTagController controller;
   final TagPlacement placement;
@@ -2531,6 +2602,8 @@ class _TagTreeNode extends StatelessWidget {
   final Set<String> expandedIds;
   final int maxIndentDepth;
   final ValueChanged<String> onToggle;
+  final void Function(TagPlacement dragged, TagPlacement target) onDrop;
+  final ValueChanged<String?> onDragStateChange;
 
   @override
   Widget build(BuildContext context) {
@@ -2540,65 +2613,134 @@ class _TagTreeNode extends StatelessWidget {
     final selected = controller.activePlacementId == placement.id;
     final expanded = expandedIds.contains(placement.id);
     final indent = 7 + (depth > maxIndentDepth ? maxIndentDepth : depth) * 20;
+    final row = InkWell(
+      onTap: () => controller.selectPlacement(placement.id),
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        height: 36,
+        padding: EdgeInsets.only(left: indent.toDouble(), right: 7),
+        decoration: BoxDecoration(
+          color: selected ? palette.primarySoft : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 18,
+              child: children.isEmpty
+                  ? null
+                  : GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onToggle(placement.id),
+                      child: Tooltip(
+                        message: expanded ? '收起' : '展开',
+                        child: Icon(
+                          expanded ? Icons.expand_more : Icons.chevron_right,
+                          size: 14,
+                        ),
+                      ),
+                    ),
+            ),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: Color(tag.colorValue),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 5),
+            Expanded(
+              child: Text(
+                tag.name,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: selected ? palette.primary : palette.textMuted,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '${controller.resourcesForPlacement(placement).length}',
+              style: TextStyle(fontSize: 11, color: palette.textFaint),
+            ),
+          ],
+        ),
+      ),
+    );
     return Column(
       children: [
-        InkWell(
-          onTap: () => controller.selectPlacement(placement.id),
-          borderRadius: BorderRadius.circular(4),
-          child: Container(
-            height: 36,
-            padding: EdgeInsets.only(left: indent.toDouble(), right: 7),
-            decoration: BoxDecoration(
-              color: selected ? palette.primarySoft : Colors.transparent,
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 18,
-                  child: children.isEmpty
-                      ? null
-                      : GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onToggle(placement.id),
-                          child: Tooltip(
-                            message: expanded ? '收起' : '展开',
-                            child: Icon(
-                              expanded
-                                  ? Icons.expand_more
-                                  : Icons.chevron_right,
-                              size: 14,
-                            ),
+        DragTarget<TagPlacement>(
+          onWillAcceptWithDetails: (details) {
+            final dragged = details.data;
+            if (dragged.id == placement.id) return false;
+            if (dragged.parentId == placement.id) return false;
+            return !_placementDescendants(
+              controller,
+              dragged.id,
+            ).contains(placement.id);
+          },
+          onAcceptWithDetails: (details) => onDrop(details.data, placement),
+          builder: (context, candidates, rejected) {
+            final highlighted = candidates.isNotEmpty;
+            return Container(
+              decoration: highlighted
+                  ? BoxDecoration(
+                      color: palette.primarySoft,
+                      border: Border.all(color: palette.primary),
+                      borderRadius: BorderRadius.circular(4),
+                    )
+                  : null,
+              child: Draggable<TagPlacement>(
+                data: placement,
+                onDragStarted: () => onDragStateChange(placement.id),
+                onDragEnd: (_) => onDragStateChange(null),
+                onDraggableCanceled: (_, _) => onDragStateChange(null),
+                feedback: Material(
+                  color: Colors.transparent,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.surface,
+                      border: Border.all(color: palette.primary),
+                      borderRadius: BorderRadius.circular(6),
+                      boxShadow: const [
+                        BoxShadow(blurRadius: 12, color: Color(0x33000000)),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: Color(tag.colorValue),
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
-                ),
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: BoxDecoration(
-                    color: Color(tag.colorValue),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 5),
-                Expanded(
-                  child: Text(
-                    tag.name,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: selected ? palette.primary : palette.textMuted,
-                      fontWeight: FontWeight.w600,
+                        const SizedBox(width: 6),
+                        Text(
+                          tag.name,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: palette.text,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-                Text(
-                  '${controller.resourcesForPlacement(placement).length}',
-                  style: TextStyle(fontSize: 11, color: palette.textFaint),
-                ),
-              ],
-            ),
-          ),
+                childWhenDragging: Opacity(opacity: 0.35, child: row),
+                child: row,
+              ),
+            );
+          },
         ),
         if (expanded)
           for (final child in children)
@@ -2609,6 +2751,8 @@ class _TagTreeNode extends StatelessWidget {
               expandedIds: expandedIds,
               maxIndentDepth: maxIndentDepth,
               onToggle: onToggle,
+              onDrop: onDrop,
+              onDragStateChange: onDragStateChange,
             ),
       ],
     );

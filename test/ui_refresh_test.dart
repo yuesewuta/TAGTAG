@@ -184,6 +184,44 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('tag tree drag reparents a tag onto another tag', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() async {
+      // Windows may keep the just-persisted JSON briefly locked; leave the
+      // system temp directory for OS cleanup instead of failing the test.
+      try {
+        await fixture.sandbox.delete(recursive: true);
+      } on PathAccessException {
+        // Ignored.
+      }
+    });
+    fixture.controller.showTagHierarchy();
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    TagPlacement placementOf(String id) => fixture.controller.state.placements
+        .firstWhere((placement) => placement.id == id);
+    expect(placementOf('place-project-design').parentId, 'place-project');
+
+    // Drag 设计 one row down onto 个人.
+    await tester.drag(find.text('设计'), const Offset(0, 36));
+    // Let the background persistence finish before the sandbox is deleted.
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 300)),
+    );
+    await tester.pumpAndSettle();
+
+    expect(placementOf('place-project-design').parentId, 'place-personal');
+    expect(find.textContaining('已更新：'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Escape closes the status drawer before anything else', (
     tester,
   ) async {
