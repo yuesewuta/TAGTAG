@@ -526,3 +526,15 @@
 - Extended the existing version-1 preferences document with backwards-compatible optional values for close behavior, startup view, appearance, density, and the Quick Tag shortcut.
 - Added runtime Windows Quick Tag re-registration with rollback to the previous binding when a requested key combination is unavailable.
 - Formatted the changed Dart files and reran static analysis: zero issues.
+
+## 会话：2026-08-12（原型对齐收尾与 v0.11.0）
+
+- 恢复 prototype-parity-ui 工单上下文，基线确认：静态分析 0 问题，全量测试 86 过 10 红（旧 UI 断言），差距清单覆盖功能回归、偏好接线、动效、像素与死代码。
+- 阶段 1 修复功能回归：一致性告警处理从状态抽屉可达、新建标签空间进入空间菜单、六个备份/空间迁移命令进入设置“存储与备份”、显式文件夹导入恢复；接通启动视图、关闭行为（新增 tagtag/windows_close_behavior 通道与原生 WM_CLOSE 分支）、窗内 Quick Tag 快捷键与空选择行为；修复清空搜索残留、检查器空间成员、logo 裁剪等；测试恢复 96/96。
+- 阶段 2 完成动效（对话框/抽屉/检查器过渡、reduced-motion）、键盘焦点（Enter 检查、Escape 分层关闭、菜单键盘行为）、像素/token 打磨，并删除 home_screen.dart 约 2700 行遗留死代码；状态抽屉改为动画控制器驱动挂载，修复 Escape 关闭测试。
+- Windows 插件符号链接问题通过为四个插件创建目录 Junction 解决，Release 构建恢复可重复。
+- 用户人工验证 UI 后提出三项调整：合并右上角导入入口为单一“导入”菜单；“设置标签层级”更名为“更改上级标签…”并移入标签操作菜单对话框；层级树重建为逐节点展开/收起 + 一次性“展开层级”命令（仅顶层/2/3/5 层/全部）+ 缩进 6 层封顶 + 选中祖先保护。
+- 新增标签树拖拽调整层级：拖到目标标签成为子级（含自身/后代/现父级拒绝高亮）、拖动中“拖到此处设为顶层”放置区、乐观反馈与后台持久化；新增拖拽 widget 测试并处理 Windows 临时目录锁竞态。
+- 用户确认后两次提交推送 main：06da8ac（三项交互改动）与 9400b60（拖拽层级）。
+- 应用图标与悬浮接收目标图标统一为 TAGTAG LOGO：从 assets/branding/tagtag-logo.png 裁切透明内容、方形填充后生成多尺寸 app_icon.ico（悬浮目标 WM_PAINT 复用 IDI_APP_ICON，无需改代码）；已核验 Release EXE 内嵌图标不再是 Flutter 默认图标。
+- 版本按 SemVer 提升为 0.11.0+1，README 当前功能版本同步为 v0.11.0；最终门禁：分析 0 问题、全量测试 100/100、Windows Release 构建成功。
