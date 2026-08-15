@@ -44,6 +44,7 @@ class FlutterWindow : public Win32Window {
   bool CreateFloatingDropTarget();
   void DestroyFloatingDropTarget();
   void ShowFloatingDropTarget();
+  void UpdateFloatingDropTargetPixels();
   static LRESULT CALLBACK FloatingDropTargetWndProc(HWND window,
                                                      UINT message,
                                                      WPARAM wparam,

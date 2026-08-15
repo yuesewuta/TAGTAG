@@ -268,7 +268,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('tag identity operations appear in the operation log and undo', (
+  testWidgets('tag operations appear on the unified log page without undo', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(960, 720);
@@ -301,24 +301,18 @@ void main() {
       ),
     );
     await tester.pump();
-    // The operation log is reachable from the status drawer's history tab.
-    await tester.tap(find.byTooltip('资料库正常，上次扫描 1 分钟前'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('操作日志'));
-    await tester.pump();
-    await _pumpUntilFound(tester, find.text('查看完整操作日志'));
-    await tester.tap(find.text('查看完整操作日志'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('标签操作'));
-    await tester.pump();
 
-    expect(find.text('拆分标签'), findsWidgets);
+    // The unified log is a first-class navigation destination.
+    await tester.tap(find.byKey(const ValueKey('nav-日志')));
+    await tester.pumpAndSettle();
+
+    expect(controller.activeView, ResourceView.log);
     expect(find.textContaining('拆分 1 个位置'), findsWidgets);
-    await tester.tap(find.byTooltip('撤销此标签操作'));
-    await tester.pumpAndSettle();
-
-    expect(controller.tagOperations.single.undoneAt, isNotNull);
-    expect(find.text('已撤销'), findsWidgets);
+    expect(find.text('标签'), findsWidgets);
+    expect(find.text('信息'), findsWidgets);
+    // No undo affordance remains on any log surface.
+    expect(find.text('撤销'), findsNothing);
+    expect(find.byTooltip('撤销此标签操作'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

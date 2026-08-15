@@ -109,7 +109,7 @@ ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
         ),
       );
   const roundedRectangle = RoundedRectangleBorder(
-    borderRadius: BorderRadius.all(Radius.circular(6)),
+    borderRadius: BorderRadius.all(Radius.circular(12)),
   );
   return base.copyWith(
     textTheme: textTheme,
@@ -122,16 +122,12 @@ ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
       toolbarHeight: 62,
       shape: Border(bottom: BorderSide(color: border)),
     ),
-    dividerTheme: DividerThemeData(
-      color: border,
-      thickness: 1,
-      space: 1,
-    ),
+    dividerTheme: DividerThemeData(color: border, thickness: 1, space: 1),
     iconTheme: IconThemeData(color: secondaryText, size: 20),
     tooltipTheme: TooltipThemeData(
       waitDuration: const Duration(milliseconds: 450),
       decoration: BoxDecoration(
-        color: foreground,
+        color: TagTagColors.foreground,
         borderRadius: BorderRadius.circular(4),
       ),
       textStyle: const TextStyle(color: Colors.white, fontSize: 12),
@@ -142,19 +138,19 @@ ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: borderStrong),
       ),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: borderStrong),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         borderSide: BorderSide(color: primary, width: 1.5),
       ),
       errorBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: TagTagColors.destructive),
       ),
     ),
@@ -162,9 +158,7 @@ ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
       style: ButtonStyle(
         foregroundColor: WidgetStatePropertyAll(secondaryText),
         overlayColor: WidgetStateProperty.resolveWith(
-          (states) => states.contains(WidgetState.hovered)
-              ? primarySoft
-              : null,
+          (states) => states.contains(WidgetState.hovered) ? primarySoft : null,
         ),
         shape: const WidgetStatePropertyAll(roundedRectangle),
       ),
@@ -195,25 +189,38 @@ ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
       ),
     ),
     popupMenuTheme: PopupMenuThemeData(
-      color: surface,
+      color: dark
+          ? const Color(0xff191c22).withValues(alpha: 0.88)
+          : Colors.white.withValues(alpha: 0.88),
       surfaceTintColor: Colors.transparent,
-      elevation: 8,
+      elevation: 12,
+      shadowColor: Colors.black.withValues(alpha: 0.18),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(6),
-        side: BorderSide(color: border),
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color: dark
+              ? Colors.white.withValues(alpha: 0.10)
+              : Colors.white.withValues(alpha: 0.50),
+        ),
       ),
     ),
+    // AlertDialogs get a translucent raised fill; PrototypeDialogFrame renders
+    // its own GlassPanel and opts into a transparent shell instead.
     dialogTheme: DialogThemeData(
-      backgroundColor: surfaceRaised,
+      backgroundColor: dark
+          ? const Color(0xff191c22).withValues(alpha: 0.82)
+          : Colors.white.withValues(alpha: 0.80),
       surfaceTintColor: Colors.transparent,
-      elevation: 18,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      elevation: 12,
+      shadowColor: Colors.black.withValues(alpha: 0.20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: const Color(0xff202833),
+      backgroundColor: const Color(0xff202833).withValues(alpha: 0.92),
       contentTextStyle: const TextStyle(color: Colors.white),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
   );
 }

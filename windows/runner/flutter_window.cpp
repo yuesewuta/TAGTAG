@@ -369,7 +369,7 @@ bool FlutterWindow::CreateFloatingDropTarget() {
   floating_drop_target_class_registered_ = registration != 0;
 
   floating_drop_target_window_ = CreateWindowExW(
-      WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST,
+      WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_LAYERED,
       kFloatingDropTargetClassName, L"TAGTAG", WS_POPUP, 0, 0,
       kFloatingDropTargetSize, kFloatingDropTargetSize, nullptr, nullptr,
       GetModuleHandle(nullptr), this);
@@ -381,13 +381,72 @@ bool FlutterWindow::CreateFloatingDropTarget() {
     return false;
   }
   DragAcceptFiles(floating_drop_target_window_, TRUE);
-  HRGN region = CreateEllipticRgn(0, 0, kFloatingDropTargetSize,
-                                  kFloatingDropTargetSize);
-  if (region != nullptr &&
-      SetWindowRgn(floating_drop_target_window_, region, TRUE) == 0) {
-    DeleteObject(region);
-  }
+  UpdateFloatingDropTargetPixels();
   return true;
+}
+
+// Renders the app icon with per-pixel alpha so the floating target shows
+// only the logo, no background disc.
+void FlutterWindow::UpdateFloatingDropTargetPixels() {
+  if (floating_drop_target_window_ == nullptr) {
+    return;
+  }
+  const int size = kFloatingDropTargetSize;
+  HDC screen_dc = GetDC(nullptr);
+  HDC memory_dc = CreateCompatibleDC(screen_dc);
+  BITMAPINFO bitmap_info{};
+  bitmap_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  bitmap_info.bmiHeader.biWidth = size;
+  bitmap_info.bmiHeader.biHeight = -size;  // top-down
+  bitmap_info.bmiHeader.biPlanes = 1;
+  bitmap_info.bmiHeader.biBitCount = 32;
+  bitmap_info.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr;
+  HBITMAP bitmap = CreateDIBSection(memory_dc, &bitmap_info, DIB_RGB_COLORS,
+                                    &bits, nullptr, 0);
+  if (bitmap == nullptr || bits == nullptr) {
+    if (bitmap != nullptr) DeleteObject(bitmap);
+    DeleteDC(memory_dc);
+    ReleaseDC(nullptr, screen_dc);
+    return;
+  }
+  ZeroMemory(bits, static_cast<size_t>(size) * size * 4);
+  HGDIOBJ previous_bitmap = SelectObject(memory_dc, bitmap);
+  HICON icon = static_cast<HICON>(LoadImageW(
+      GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON,
+      size, size, LR_DEFAULTCOLOR));
+  if (icon != nullptr) {
+    DrawIconEx(memory_dc, 0, 0, icon, size, size, 0, nullptr, DI_NORMAL);
+    DestroyIcon(icon);
+  }
+  // DrawIconEx writes straight (non-premultiplied) colors; UpdateLayeredWindow
+  // needs premultiplied alpha.
+  unsigned char* pixels = static_cast<unsigned char*>(bits);
+  const int count = size * size;
+  for (int index = 0; index < count; ++index) {
+    const unsigned char alpha = pixels[index * 4 + 3];
+    pixels[index * 4 + 0] =
+        static_cast<unsigned char>((pixels[index * 4 + 0] * alpha + 127) / 255);
+    pixels[index * 4 + 1] =
+        static_cast<unsigned char>((pixels[index * 4 + 1] * alpha + 127) / 255);
+    pixels[index * 4 + 2] =
+        static_cast<unsigned char>((pixels[index * 4 + 2] * alpha + 127) / 255);
+  }
+  RECT window_rect{};
+  GetWindowRect(floating_drop_target_window_, &window_rect);
+  POINT destination{window_rect.left, window_rect.top};
+  POINT origin{0, 0};
+  SIZE extent{size, size};
+  BLENDFUNCTION blend{};
+  blend.BlendOp = AC_SRC_OVER;
+  blend.SourceConstantAlpha = 255;
+  blend.AlphaFormat = AC_SRC_ALPHA;
+  UpdateLayeredWindow(floating_drop_target_window_, screen_dc, &destination,
+                      &extent, memory_dc, &origin, 0, &blend, ULW_ALPHA);
+  SelectObject(memory_dc, previous_bitmap);
+  DeleteObject(bitmap);
+  DeleteDC(memory_dc);
+  ReleaseDC(nullptr, screen_dc);
 }
 
 void FlutterWindow::DestroyFloatingDropTarget() {
@@ -450,20 +509,7 @@ LRESULT FlutterWindow::HandleFloatingDropTargetMessage(
       return TRUE;
     case WM_PAINT: {
       PAINTSTRUCT paint{};
-      HDC device_context = BeginPaint(window, &paint);
-      HBRUSH fill = CreateSolidBrush(RGB(15, 118, 110));
-      HPEN outline = CreatePen(PS_SOLID, 2, RGB(13, 92, 86));
-      HGDIOBJ previous_fill = SelectObject(device_context, fill);
-      HGDIOBJ previous_outline = SelectObject(device_context, outline);
-      Ellipse(device_context, 1, 1, kFloatingDropTargetSize - 1,
-              kFloatingDropTargetSize - 1);
-      SelectObject(device_context, previous_fill);
-      SelectObject(device_context, previous_outline);
-      DeleteObject(fill);
-      DeleteObject(outline);
-      HICON icon =
-          LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_APP_ICON));
-      DrawIconEx(device_context, 20, 20, icon, 24, 24, 0, nullptr, DI_NORMAL);
+      BeginPaint(window, &paint);
       EndPaint(window, &paint);
       return 0;
     }

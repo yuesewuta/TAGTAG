@@ -9,17 +9,22 @@ import 'package:path/path.dart' as path;
 import '../models/tag_models.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
+import 'glass.dart';
 import 'tagtag_theme.dart';
 
-/// Shows a modal with the prototype's motion: 180ms backdrop fade plus a
-/// 200ms translateY/scale on the dialog (styles.css modal-layer/dialog).
-/// Honors reduced motion via MediaQuery.disableAnimations.
+/// Shows a modal with Liquid Glass motion: 160ms fade plus a springy
+/// 0.92 → 1.0 scale (easeOutBack). Honors reduced motion via
+/// MediaQuery.disableAnimations.
 Future<T?> showPrototypeDialog<T>({
   required BuildContext context,
   required WidgetBuilder builder,
   bool barrierDismissible = true,
 }) {
   final reduceMotion = MediaQuery.of(context).disableAnimations;
+  // Dialog routes live on the root navigator, above the home screen's Theme
+  // override (dark/light selection). Capture the caller's theme so dialogs
+  // follow the selected appearance.
+  final theme = Theme.of(context);
   return showGeneralDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
@@ -29,28 +34,20 @@ Future<T?> showPrototypeDialog<T>({
     barrierColor: const Color(0x7a10161f),
     transitionDuration: reduceMotion
         ? Duration.zero
-        : const Duration(milliseconds: 200),
-    pageBuilder: (context, _, _) => builder(context),
+        : const Duration(milliseconds: 220),
+    pageBuilder: (context, _, _) => Theme(data: theme, child: builder(context)),
     transitionBuilder: (context, animation, _, child) {
       if (reduceMotion) return child;
-      final curved = CurvedAnimation(
-        parent: animation,
-        curve: const Cubic(0.2, 0.7, 0.2, 1),
-      );
       return FadeTransition(
         opacity: CurvedAnimation(
           parent: animation,
-          curve: const Interval(0, 0.9),
+          curve: const Interval(0, 160 / 220),
         ),
-        child: SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(0, 0.018),
-            end: Offset.zero,
-          ).animate(curved),
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.985, end: 1).animate(curved),
-            child: child,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.92, end: 1).animate(
+            CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
           ),
+          child: child,
         ),
       );
     },
@@ -104,15 +101,16 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
   @override
   Widget build(BuildContext context) {
     final query = _queryController.text.trim().toLowerCase();
-    final placements = widget.controller.placementsInActiveSpace.where((
-      placement,
-    ) {
-      if (query.isEmpty) return true;
-      final tag = widget.controller.tagForPlacement(placement);
-      return '${tag.name} ${widget.controller.pathOf(placement.id)}'
-          .toLowerCase()
-          .contains(query);
-    }).toList();
+    final allPlacements = widget.controller.placementsInActiveSpace;
+    final common = widget.controller.commonPlacements;
+    final placements = query.isEmpty
+        ? (common.isEmpty ? allPlacements : common)
+        : allPlacements.where((placement) {
+            final tag = widget.controller.tagForPlacement(placement);
+            return '${tag.name} ${widget.controller.pathOf(placement.id)}'
+                .toLowerCase()
+                .contains(query);
+          }).toList();
     final canInherit = widget.controller.selectedFolderForInheritance != null;
     return PrototypeDialogFrame(
       width: 560,
@@ -143,7 +141,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('最近使用', style: _sectionLabelStyle(context)),
+              child: Text('常用标签', style: _sectionLabelStyle(context)),
             ),
           ),
           Flexible(
@@ -234,7 +232,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        FilledButton.icon(
+        GlassPrimaryButton.icon(
           onPressed: _selectedPlacementIds.isEmpty
               ? null
               : () => Navigator.pop(
@@ -376,7 +374,7 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        FilledButton.icon(
+        GlassPrimaryButton.icon(
           onPressed: _sources.isEmpty
               ? null
               : () => Navigator.pop(
@@ -989,7 +987,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
               onPressed: () => Navigator.pop(context),
               child: const Text('取消'),
             ),
-            FilledButton.icon(
+            GlassPrimaryButton.icon(
               onPressed: () => Navigator.pop(
                 context,
                 PrototypeSettingsResult(
@@ -1716,17 +1714,35 @@ class PrototypeDialogFrame extends StatelessWidget {
     return Dialog(
       alignment: compact ? Alignment.bottomCenter : Alignment.center,
       insetPadding: compact ? EdgeInsets.zero : const EdgeInsets.all(24),
+      backgroundColor: Colors.transparent,
+      elevation: 0,
       shape: compact
           ? const RoundedRectangleBorder(
-              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(GlassTokens.dialogRadius),
+              ),
             )
           : null,
-      child: fixedHeight == null
-          ? ConstrainedBox(
-              constraints: BoxConstraints(maxHeight: availableHeight),
-              child: content,
-            )
-          : content,
+      child: GlassPanel(
+        borderRadius: compact
+            ? const BorderRadius.vertical(
+                top: Radius.circular(GlassTokens.dialogRadius),
+              )
+            : BorderRadius.circular(GlassTokens.dialogRadius),
+        blur: 22,
+        shadow: !compact,
+        // Dialogs carry dense text: run a slightly stronger fill than the
+        // default panel so muted labels stay readable over the blur.
+        fill: Theme.of(context).brightness == Brightness.dark
+            ? const Color(0xff191c22).withValues(alpha: 0.82)
+            : Colors.white.withValues(alpha: 0.86),
+        child: fixedHeight == null
+            ? ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: availableHeight),
+                child: content,
+              )
+            : content,
+      ),
     );
   }
 }
@@ -1785,13 +1801,20 @@ class PrototypeTagOption extends StatelessWidget {
                     name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      height: 1.15,
+                    ),
                   ),
                   Text(
                     path,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: _muted(context)),
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1.25,
+                      color: _muted(context),
+                    ),
                   ),
                 ],
               ),

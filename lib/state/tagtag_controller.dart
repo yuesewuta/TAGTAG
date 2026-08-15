@@ -10,11 +10,30 @@ import '../models/tag_models.dart';
 import '../services/space_portability.dart';
 import '../storage/managed_library.dart';
 
-enum ResourceView { all, hierarchy, inbox, recent, search }
-
-enum SearchKindFilter { all, file, folder }
+enum ResourceView { all, hierarchy, inbox, recent, search, log }
 
 enum SearchTagCondition { none, and, or, not }
+
+/// A single row in the unified application log (merged from resource
+/// operations, tag operations, and app-level events).
+class LogEntry {
+  const LogEntry({
+    required this.timestamp,
+    required this.level,
+    required this.category,
+    required this.summary,
+    this.spaceName,
+  });
+
+  final DateTime timestamp;
+  final LogLevel level;
+  final LogCategory category;
+  final String summary;
+
+  /// Name of the owning tag space for space-scoped entries (tag changes);
+  /// null for global entries (resource, settings, consistency).
+  final String? spaceName;
+}
 
 enum InboxScope { currentSpace, global }
 
@@ -160,6 +179,7 @@ class TagTagController extends ChangeNotifier {
     String? interfaceDensity,
     String? quickTagShortcut,
   }) async {
+    final previous = _preferences;
     _preferences = _preferences.copyWith(
       moveImportsByDefault: moveImportsByDefault,
       floatingDropTargetEnabled: floatingDropTargetEnabled,
@@ -169,8 +189,59 @@ class TagTagController extends ChangeNotifier {
       interfaceDensity: interfaceDensity,
       quickTagShortcut: quickTagShortcut,
     );
+    final changes = _describePreferenceChanges(previous, _preferences);
+    if (changes.isNotEmpty) {
+      _state = _state.copyWith(
+        logEvents: _appendLogEvent(
+          _state.logEvents,
+          LogLevel.info,
+          LogCategory.settings,
+          '更新设置：${changes.join('；')}',
+        ),
+      );
+    }
     notifyListeners();
     await _persistTagDomainMetadata();
+  }
+
+  static List<String> _describePreferenceChanges(
+    UserPreferences before,
+    UserPreferences after,
+  ) {
+    final changes = <String>[];
+    if (before.moveImportsByDefault != after.moveImportsByDefault) {
+      String mode(bool value) => value ? '移动' : '复制';
+      changes.add(
+        '默认导入方式 ${mode(before.moveImportsByDefault)} → ${mode(after.moveImportsByDefault)}',
+      );
+    }
+    if (before.floatingDropTargetEnabled != after.floatingDropTargetEnabled) {
+      changes.add('悬浮接收目标 ${after.floatingDropTargetEnabled ? '开启' : '关闭'}');
+    }
+    if (before.closeToTray != after.closeToTray) {
+      changes.add('关闭主窗口时 ${after.closeToTray ? '隐藏到托盘' : '退出'}');
+    }
+    if (before.startupView != after.startupView) {
+      const labels = {'last': '上次使用的视图', 'all': '全部资源', 'inbox': '待整理'};
+      String label(String value) => labels[value] ?? value;
+      changes.add(
+        '启动视图 ${label(before.startupView)} → ${label(after.startupView)}',
+      );
+    }
+    if (before.appearanceTheme != after.appearanceTheme) {
+      changes.add('外观 ${after.appearanceTheme == 'dark' ? '深色' : '浅色'}');
+    }
+    if (before.interfaceDensity != after.interfaceDensity) {
+      changes.add(
+        '界面密度 ${after.interfaceDensity == 'comfortable' ? '舒适' : '紧凑'}',
+      );
+    }
+    if (before.quickTagShortcut != after.quickTagShortcut) {
+      changes.add(
+        'Quick Tag 快捷键 ${before.quickTagShortcut} → ${after.quickTagShortcut}',
+      );
+    }
+    return changes;
   }
 
   List<TagPlacement> get rootPlacements {
@@ -207,9 +278,7 @@ class TagTagController extends ChangeNotifier {
         .where((membership) => membership.resourceId == resourceId)
         .map((membership) => membership.spaceId)
         .toSet();
-    return _state.spaces
-        .where((space) => spaceIds.contains(space.id))
-        .toList();
+    return _state.spaces.where((space) => spaceIds.contains(space.id)).toList();
   }
 
   List<TagResource> get visibleResources {
@@ -292,12 +361,30 @@ class TagTagController extends ChangeNotifier {
         );
       }
     }
-    final placements =
-        placementsInActiveSpace
-            .where((placement) => counts.containsKey(placement.id))
+    int countOf(String placementId) => counts[placementId] ?? 0;
+    final candidates = placementsInActiveSpace
+        .where((placement) => !_state.hiddenPlacementIds.contains(placement.id))
+        .where(
+          (placement) =>
+              _state.pinnedPlacementIds.contains(placement.id) ||
+              counts.containsKey(placement.id),
+        )
+        .toList();
+    final pinned =
+        candidates
+            .where(
+              (placement) => _state.pinnedPlacementIds.contains(placement.id),
+            )
             .toList()
-          ..sort((a, b) => (counts[b.id] ?? 0).compareTo(counts[a.id] ?? 0));
-    return placements.take(5).toList();
+          ..sort((a, b) => countOf(b.id).compareTo(countOf(a.id)));
+    final unpinned =
+        candidates
+            .where(
+              (placement) => !_state.pinnedPlacementIds.contains(placement.id),
+            )
+            .toList()
+          ..sort((a, b) => countOf(b.id).compareTo(countOf(a.id)));
+    return [...pinned, ...unpinned].take(5).toList();
   }
 
   List<TagPlacement> assignmentsForResource(String resourceId) {
@@ -478,6 +565,13 @@ class TagTagController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void showLog() {
+    activePlacementId = null;
+    activeView = ResourceView.log;
+    selectedResourceIds.clear();
+    notifyListeners();
+  }
+
   void setSearchTerm(String value) {
     searchTerm = value;
     notifyListeners();
@@ -560,6 +654,162 @@ class TagTagController extends ChangeNotifier {
   void setIncludeDescendants(bool value) {
     includeDescendants = value;
     notifyListeners();
+  }
+
+  // ---- Saved queries ----
+
+  List<SavedQuery> get savedQueriesInActiveSpace {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return const [];
+    }
+    return _state.savedQueries
+        .where((query) => query.spaceId == spaceId)
+        .toList();
+  }
+
+  bool get hasActiveSearchCondition =>
+      searchTerm.trim().isNotEmpty || hasAdvancedSearchFilters;
+
+  Future<SavedQuery> saveCurrentSearch(String name) async {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      throw StateError('请先创建标签空间');
+    }
+    final cleanName = name.trim();
+    if (cleanName.isEmpty) {
+      throw ArgumentError('查询名称不能为空');
+    }
+    if (!hasActiveSearchCondition) {
+      throw StateError('没有可保存的搜索条件');
+    }
+    final saved = SavedQuery(
+      id: newId('saved-query'),
+      spaceId: spaceId,
+      name: cleanName,
+      term: searchTerm,
+      kind: searchKind,
+      minimumSizeBytes: searchMinimumSizeBytes,
+      maximumSizeBytes: searchMaximumSizeBytes,
+      createdFrom: searchCreatedFrom,
+      createdTo: searchCreatedTo,
+      modifiedFrom: searchModifiedFrom,
+      modifiedTo: searchModifiedTo,
+      andTagIds: Set.unmodifiable(searchAndTagIds),
+      orTagIds: Set.unmodifiable(searchOrTagIds),
+      notTagIds: Set.unmodifiable(searchNotTagIds),
+      includeDescendants: includeDescendants,
+      createdAt: DateTime.now(),
+    );
+    await _update(
+      _state.copyWith(savedQueries: [..._state.savedQueries, saved]),
+    );
+    return saved;
+  }
+
+  Future<void> applySavedQuery(String id) async {
+    final matches = _state.savedQueries.where((query) => query.id == id);
+    if (matches.isEmpty) {
+      throw StateError('保存的查询不存在');
+    }
+    final saved = matches.first;
+    searchTerm = saved.term;
+    searchKind = saved.kind;
+    searchMinimumSizeBytes = saved.minimumSizeBytes;
+    searchMaximumSizeBytes = saved.maximumSizeBytes;
+    searchCreatedFrom = saved.createdFrom;
+    searchCreatedTo = saved.createdTo;
+    searchModifiedFrom = saved.modifiedFrom;
+    searchModifiedTo = saved.modifiedTo;
+    searchAndTagIds
+      ..clear()
+      ..addAll(saved.andTagIds);
+    searchOrTagIds
+      ..clear()
+      ..addAll(saved.orTagIds);
+    searchNotTagIds
+      ..clear()
+      ..addAll(saved.notTagIds);
+    includeDescendants = saved.includeDescendants;
+    showSearchResources();
+  }
+
+  Future<void> deleteSavedQuery(String id) async {
+    await _update(
+      _state.copyWith(
+        savedQueries: _state.savedQueries
+            .where((query) => query.id != id)
+            .toList(),
+      ),
+    );
+  }
+
+  // ---- Frequent tag pin / hide ----
+
+  bool isPlacementPinned(String placementId) =>
+      _state.pinnedPlacementIds.contains(placementId);
+
+  bool isPlacementHidden(String placementId) =>
+      _state.hiddenPlacementIds.contains(placementId);
+
+  Future<void> togglePlacementPinned(String placementId) async {
+    _requireActiveSpacePlacement(placementId);
+    final pinned = {..._state.pinnedPlacementIds};
+    final nowPinned = !pinned.remove(placementId);
+    if (nowPinned) {
+      pinned.add(placementId);
+    }
+    final name = _state.tagById(_state.placementById(placementId).tagId).name;
+    await _update(
+      _withTagOperation(
+        _state.copyWith(pinnedPlacementIds: pinned),
+        TagDomainOperationType.pin,
+        nowPinned ? '固定常用标签“$name”' : '取消固定常用标签“$name”',
+      ),
+    );
+  }
+
+  Future<void> togglePlacementHidden(String placementId) async {
+    _requireActiveSpacePlacement(placementId);
+    final hidden = {..._state.hiddenPlacementIds};
+    final nowHidden = !hidden.remove(placementId);
+    if (nowHidden) {
+      hidden.add(placementId);
+    }
+    final name = _state.tagById(_state.placementById(placementId).tagId).name;
+    await _update(
+      _withTagOperation(
+        _state.copyWith(hiddenPlacementIds: hidden),
+        TagDomainOperationType.hide,
+        nowHidden ? '隐藏常用标签“$name”' : '取消隐藏常用标签“$name”',
+      ),
+    );
+  }
+
+  void _requireActiveSpacePlacement(String placementId) {
+    final spaceId = activeSpaceId;
+    final placement = _state.placements
+        .where((item) => item.id == placementId)
+        .firstOrNull;
+    if (spaceId == null || placement == null || placement.spaceId != spaceId) {
+      throw StateError('只能固定或隐藏当前标签空间中的标签');
+    }
+  }
+
+  // ---- Usage history cleanup ----
+
+  Future<void> clearUsageHistory() async {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return;
+    }
+    await _update(
+      _state.copyWith(
+        usageEvents: _state.usageEvents
+            .where((event) => event.spaceId != spaceId)
+            .toList(),
+      ),
+    );
   }
 
   void toggleResourceSelection(String resourceId, bool selected) {
@@ -648,9 +898,13 @@ class TagTagController extends ChangeNotifier {
       sortOrder: siblings.length,
     );
     await _update(
-      _state.copyWith(
-        tags: reuseTagId == null ? [..._state.tags, tag] : _state.tags,
-        placements: [..._state.placements, placement],
+      _withTagOperation(
+        _state.copyWith(
+          tags: reuseTagId == null ? [..._state.tags, tag] : _state.tags,
+          placements: [..._state.placements, placement],
+        ),
+        TagDomainOperationType.create,
+        reuseTagId == null ? '新建标签“$cleanName”' : '复用标签实体创建位置“${tag.name}”',
       ),
     );
     activePlacementId = placement.id;
@@ -667,15 +921,22 @@ class TagTagController extends ChangeNotifier {
     if (cleanName.isEmpty) {
       throw ArgumentError('标签名称不能为空');
     }
+    final previous = _state.tagById(tagId);
     await _update(
-      _state.copyWith(
-        tags: _state.tags
-            .map(
-              (tag) => tag.id == tagId
-                  ? tag.copyWith(name: cleanName, colorValue: colorValue)
-                  : tag,
-            )
-            .toList(),
+      _withTagOperation(
+        _state.copyWith(
+          tags: _state.tags
+              .map(
+                (tag) => tag.id == tagId
+                    ? tag.copyWith(name: cleanName, colorValue: colorValue)
+                    : tag,
+              )
+              .toList(),
+        ),
+        TagDomainOperationType.edit,
+        previous.name == cleanName
+            ? '更新标签“$cleanName”的颜色'
+            : '重命名标签“${previous.name}”为“$cleanName”',
       ),
     );
   }
@@ -713,21 +974,29 @@ class TagTagController extends ChangeNotifier {
       }
     }
     final siblings = _state.childrenOf(nextParentId, spaceId);
+    final movedName = _state.tagById(placement.tagId).name;
+    final targetPath = nextParentId == null
+        ? '顶层'
+        : _state.pathOf(nextParentId);
     await _update(
-      _state.copyWith(
-        placements: _state.placements
-            .map(
-              (item) => item.id == placementId
-                  ? TagPlacement(
-                      id: item.id,
-                      spaceId: item.spaceId,
-                      tagId: item.tagId,
-                      parentId: nextParentId,
-                      sortOrder: siblings.length,
-                    )
-                  : item,
-            )
-            .toList(),
+      _withTagOperation(
+        _state.copyWith(
+          placements: _state.placements
+              .map(
+                (item) => item.id == placementId
+                    ? TagPlacement(
+                        id: item.id,
+                        spaceId: item.spaceId,
+                        tagId: item.tagId,
+                        parentId: nextParentId,
+                        sortOrder: siblings.length,
+                      )
+                    : item,
+              )
+              .toList(),
+        ),
+        TagDomainOperationType.reparent,
+        '调整标签“$movedName”的层级至“$targetPath”',
       ),
     );
     activePlacementId = placementId;
@@ -1051,6 +1320,7 @@ class TagTagController extends ChangeNotifier {
               : item,
         )
         .toList();
+    final removedPath = _state.pathOf(placementId);
     final replacementPlacementId = alternativePlacements.first.id;
     final assignmentKeys = <String>{};
     final remainingAssignments = <TagAssignment>[];
@@ -1069,9 +1339,13 @@ class TagTagController extends ChangeNotifier {
     }
     activePlacementId = null;
     await _update(
-      _state.copyWith(
-        placements: remainingPlacements,
-        assignments: remainingAssignments,
+      _withTagOperation(
+        _state.copyWith(
+          placements: remainingPlacements,
+          assignments: remainingAssignments,
+        ),
+        TagDomainOperationType.deletePlacement,
+        '删除标签位置“$removedPath”',
       ),
     );
   }
@@ -1126,18 +1400,22 @@ class TagTagController extends ChangeNotifier {
         .toList();
     activePlacementId = null;
     await _update(
-      _state.copyWith(
-        tags: _state.tags.where((item) => item.id != tagId).toList(),
-        placements: placements,
-        assignments: _state.assignments
-            .where(
-              (assignment) =>
-                  !removedPlacementIds.contains(assignment.placementId),
-            )
-            .toList(),
-        folderTagInheritances: _state.folderTagInheritances
-            .where((rule) => rule.tagId != tagId)
-            .toList(),
+      _withTagOperation(
+        _state.copyWith(
+          tags: _state.tags.where((item) => item.id != tagId).toList(),
+          placements: placements,
+          assignments: _state.assignments
+              .where(
+                (assignment) =>
+                    !removedPlacementIds.contains(assignment.placementId),
+              )
+              .toList(),
+          folderTagInheritances: _state.folderTagInheritances
+              .where((rule) => rule.tagId != tagId)
+              .toList(),
+        ),
+        TagDomainOperationType.deleteEntity,
+        '删除标签实体“${tag.name}”',
       ),
     );
   }
@@ -1461,12 +1739,186 @@ class TagTagController extends ChangeNotifier {
     );
   }
 
+  String? _lastConsistencySignature;
+
   Future<List<ConsistencyFinding>> scanConsistency() async {
     final managedLibrary = library;
     if (managedLibrary == null) {
       return const [];
     }
-    return managedLibrary.scanConsistency();
+    final findings = await managedLibrary.scanConsistency();
+    _logConsistencyFindings(findings);
+    return findings;
+  }
+
+  void _logConsistencyFindings(List<ConsistencyFinding> findings) {
+    final signature =
+        findings
+            .map((finding) => '${finding.type.name}:${finding.relativePath}')
+            .toList()
+          ..sort();
+    final encoded = signature.join('|');
+    if (encoded == _lastConsistencySignature) {
+      return;
+    }
+    final hadFindings =
+        _lastConsistencySignature != null &&
+        _lastConsistencySignature!.isNotEmpty;
+    _lastConsistencySignature = encoded;
+    final LogLevel level;
+    final String summary;
+    if (findings.isEmpty) {
+      if (!hadFindings) {
+        return;
+      }
+      level = LogLevel.info;
+      summary = '一致性恢复：告警已清除';
+    } else {
+      final untracked = findings
+          .where((finding) => finding.type == ConsistencyFindingType.untracked)
+          .length;
+      final missing = findings.length - untracked;
+      final parts = [
+        if (untracked > 0) '$untracked 项外部新增',
+        if (missing > 0) '$missing 项缺失',
+      ];
+      level = LogLevel.notice;
+      summary = '一致性扫描：${parts.join('，')}';
+    }
+    _state = _state.copyWith(
+      logEvents: _appendLogEvent(
+        _state.logEvents,
+        level,
+        LogCategory.consistency,
+        summary,
+      ),
+    );
+    notifyListeners();
+    unawaited(_persistTagDomainMetadata());
+  }
+
+  static List<AppLogEvent> _appendLogEvent(
+    List<AppLogEvent> events,
+    LogLevel level,
+    LogCategory category,
+    String summary,
+  ) {
+    final next = [
+      ...events,
+      AppLogEvent(
+        id: newId('log'),
+        timestamp: DateTime.now(),
+        level: level,
+        category: category,
+        summary: summary,
+      ),
+    ];
+    if (next.length > 500) {
+      next.removeRange(0, next.length - 500);
+    }
+    return next;
+  }
+
+  // ---- Unified log ----
+
+  Future<List<LogEntry>> listLogEntries() async {
+    final entries = <LogEntry>[
+      for (final event in _state.logEvents)
+        LogEntry(
+          timestamp: event.timestamp,
+          level: event.level,
+          category: event.category,
+          summary: event.summary,
+        ),
+      for (final operation in _state.tagOperations)
+        LogEntry(
+          timestamp: operation.createdAt,
+          level: switch (operation.type) {
+            TagDomainOperationType.deletePlacement ||
+            TagDomainOperationType.deleteEntity => LogLevel.notice,
+            _ => LogLevel.info,
+          },
+          category: LogCategory.tag,
+          summary: operation.undoneAt == null
+              ? operation.summary
+              : '${operation.summary}（已撤销）',
+          spaceName: _state.spaces
+              .where((space) => space.id == operation.spaceId)
+              .firstOrNull
+              ?.name,
+        ),
+    ];
+    for (final operation in await listOperations()) {
+      entries.add(
+        LogEntry(
+          timestamp: operation.createdAt,
+          level: _managedOperationLevel(operation.type),
+          category: LogCategory.resource,
+          summary: _managedOperationSummary(operation),
+        ),
+      );
+    }
+    entries.sort(
+      (first, second) => second.timestamp.compareTo(first.timestamp),
+    );
+    return entries;
+  }
+
+  static LogLevel _managedOperationLevel(ManagedOperationType type) =>
+      switch (type) {
+        ManagedOperationType.exitRestore ||
+        ManagedOperationType.exitMove ||
+        ManagedOperationType.exitRecycle ||
+        ManagedOperationType.untrackedMoveOut => LogLevel.notice,
+        _ => LogLevel.info,
+      };
+
+  static String _managedOperationSummary(ManagedOperation operation) {
+    final segments = operation.destinationRelativePath
+        .split('/')
+        .where((segment) => segment.isNotEmpty)
+        .toList();
+    final name = segments.isNotEmpty
+        ? segments.last
+        : operation.sourcePath.split(RegExp(r'[\\/]')).last;
+    final title = switch (operation.type) {
+      ManagedOperationType.importCopy => '复制导入资源',
+      ManagedOperationType.importMove => '移动导入资源',
+      ManagedOperationType.exitRestore => '恢复原路径并退出管理',
+      ManagedOperationType.exitMove => '移动到指定位置并退出',
+      ManagedOperationType.exitRecycle => '移入回收站并退出',
+      ManagedOperationType.takeover => '接管未受管内容',
+      ManagedOperationType.untrackedMoveOut => '移出未受管内容',
+      ManagedOperationType.externalMoveAccept => '接受外部移动',
+      ManagedOperationType.externalMoveRestore => '恢复记录路径',
+    };
+    final suffix = operation.undoneAt == null ? '' : '（已撤销）';
+    return '$title “$name”$suffix';
+  }
+
+  AppState _withTagOperation(
+    AppState state,
+    TagDomainOperationType type,
+    String summary,
+  ) {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return state;
+    }
+    return state.copyWith(
+      tagOperations: [
+        ...state.tagOperations,
+        TagDomainOperation(
+          id: newId('tagop'),
+          spaceId: spaceId,
+          type: type,
+          summary: summary,
+          context: const {},
+          createdAt: DateTime.now(),
+          undoneAt: null,
+        ),
+      ],
+    );
   }
 
   Future<ManagedResource> takeOverUntracked(String relativePath) async {

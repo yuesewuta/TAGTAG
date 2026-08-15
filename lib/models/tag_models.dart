@@ -4,7 +4,19 @@ enum ResourceKind { file, folder }
 
 enum UsageEventType { opened, tagged, searched }
 
-enum TagDomainOperationType { merge, split }
+enum TagDomainOperationType {
+  merge,
+  split,
+  create,
+  edit,
+  deletePlacement,
+  deleteEntity,
+  reparent,
+  pin,
+  hide,
+}
+
+enum SearchKindFilter { all, file, folder }
 
 String newId(String prefix) {
   final random = Random.secure().nextInt(1 << 32).toRadixString(16);
@@ -268,6 +280,91 @@ class UsageEvent {
   );
 }
 
+class SavedQuery {
+  const SavedQuery({
+    required this.id,
+    required this.spaceId,
+    required this.name,
+    required this.term,
+    required this.kind,
+    required this.minimumSizeBytes,
+    required this.maximumSizeBytes,
+    required this.createdFrom,
+    required this.createdTo,
+    required this.modifiedFrom,
+    required this.modifiedTo,
+    required this.andTagIds,
+    required this.orTagIds,
+    required this.notTagIds,
+    required this.includeDescendants,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String spaceId;
+  final String name;
+  final String term;
+  final SearchKindFilter kind;
+  final int? minimumSizeBytes;
+  final int? maximumSizeBytes;
+  final DateTime? createdFrom;
+  final DateTime? createdTo;
+  final DateTime? modifiedFrom;
+  final DateTime? modifiedTo;
+  final Set<String> andTagIds;
+  final Set<String> orTagIds;
+  final Set<String> notTagIds;
+  final bool includeDescendants;
+  final DateTime createdAt;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'spaceId': spaceId,
+    'name': name,
+    'term': term,
+    'kind': kind.name,
+    'minimumSizeBytes': minimumSizeBytes,
+    'maximumSizeBytes': maximumSizeBytes,
+    'createdFrom': createdFrom?.toIso8601String(),
+    'createdTo': createdTo?.toIso8601String(),
+    'modifiedFrom': modifiedFrom?.toIso8601String(),
+    'modifiedTo': modifiedTo?.toIso8601String(),
+    'andTagIds': andTagIds.toList(),
+    'orTagIds': orTagIds.toList(),
+    'notTagIds': notTagIds.toList(),
+    'includeDescendants': includeDescendants,
+    'createdAt': createdAt.toIso8601String(),
+  };
+
+  factory SavedQuery.fromJson(Map<String, dynamic> json) => SavedQuery(
+    id: json['id'] as String,
+    spaceId: json['spaceId'] as String,
+    name: json['name'] as String,
+    term: json['term'] as String,
+    kind: SearchKindFilter.values.byName(json['kind'] as String),
+    minimumSizeBytes: json['minimumSizeBytes'] as int?,
+    maximumSizeBytes: json['maximumSizeBytes'] as int?,
+    createdFrom: _dateOrNull(json['createdFrom']),
+    createdTo: _dateOrNull(json['createdTo']),
+    modifiedFrom: _dateOrNull(json['modifiedFrom']),
+    modifiedTo: _dateOrNull(json['modifiedTo']),
+    andTagIds: (json['andTagIds'] as List<dynamic>? ?? const [])
+        .cast<String>()
+        .toSet(),
+    orTagIds: (json['orTagIds'] as List<dynamic>? ?? const [])
+        .cast<String>()
+        .toSet(),
+    notTagIds: (json['notTagIds'] as List<dynamic>? ?? const [])
+        .cast<String>()
+        .toSet(),
+    includeDescendants: json['includeDescendants'] as bool? ?? true,
+    createdAt: DateTime.parse(json['createdAt'] as String),
+  );
+}
+
+DateTime? _dateOrNull(Object? value) =>
+    value is String ? DateTime.parse(value) : null;
+
 class TagDomainOperation {
   const TagDomainOperation({
     required this.id,
@@ -322,6 +419,44 @@ class TagDomainOperation {
       );
 }
 
+enum LogLevel { info, notice, warning }
+
+enum LogCategory { resource, tag, settings, consistency }
+
+/// A lightweight persisted log event for application-level changes that are
+/// not managed resource operations or tag operations (settings, consistency).
+class AppLogEvent {
+  const AppLogEvent({
+    required this.id,
+    required this.timestamp,
+    required this.level,
+    required this.category,
+    required this.summary,
+  });
+
+  final String id;
+  final DateTime timestamp;
+  final LogLevel level;
+  final LogCategory category;
+  final String summary;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'timestamp': timestamp.toIso8601String(),
+    'level': level.name,
+    'category': category.name,
+    'summary': summary,
+  };
+
+  factory AppLogEvent.fromJson(Map<String, dynamic> json) => AppLogEvent(
+    id: json['id'] as String,
+    timestamp: DateTime.parse(json['timestamp'] as String),
+    level: LogLevel.values.byName(json['level'] as String),
+    category: LogCategory.values.byName(json['category'] as String),
+    summary: json['summary'] as String,
+  );
+}
+
 class AppState {
   const AppState({
     required this.spaces,
@@ -334,6 +469,10 @@ class AppState {
     required this.usageEvents,
     required this.activeSpaceId,
     this.tagOperations = const [],
+    this.savedQueries = const [],
+    this.pinnedPlacementIds = const {},
+    this.hiddenPlacementIds = const {},
+    this.logEvents = const [],
   });
 
   final List<TagSpace> spaces;
@@ -346,6 +485,10 @@ class AppState {
   final List<UsageEvent> usageEvents;
   final String? activeSpaceId;
   final List<TagDomainOperation> tagOperations;
+  final List<SavedQuery> savedQueries;
+  final Set<String> pinnedPlacementIds;
+  final Set<String> hiddenPlacementIds;
+  final List<AppLogEvent> logEvents;
 
   factory AppState.empty() => const AppState(
     spaces: [],
@@ -599,6 +742,10 @@ class AppState {
     List<FolderTagInheritance>? folderTagInheritances,
     List<UsageEvent>? usageEvents,
     List<TagDomainOperation>? tagOperations,
+    List<SavedQuery>? savedQueries,
+    Set<String>? pinnedPlacementIds,
+    Set<String>? hiddenPlacementIds,
+    List<AppLogEvent>? logEvents,
     String? activeSpaceId,
     bool clearActiveSpace = false,
   }) => AppState(
@@ -611,6 +758,10 @@ class AppState {
     folderTagInheritances: folderTagInheritances ?? this.folderTagInheritances,
     usageEvents: usageEvents ?? this.usageEvents,
     tagOperations: tagOperations ?? this.tagOperations,
+    savedQueries: savedQueries ?? this.savedQueries,
+    pinnedPlacementIds: pinnedPlacementIds ?? this.pinnedPlacementIds,
+    hiddenPlacementIds: hiddenPlacementIds ?? this.hiddenPlacementIds,
+    logEvents: logEvents ?? this.logEvents,
     activeSpaceId: clearActiveSpace
         ? null
         : activeSpaceId ?? this.activeSpaceId,
@@ -720,7 +871,7 @@ class AppState {
   }
 
   Map<String, dynamic> toJson() => {
-    'version': 4,
+    'version': 5,
     'activeSpaceId': activeSpaceId,
     'spaces': spaces.map((item) => item.toJson()).toList(),
     'tags': tags.map((item) => item.toJson()).toList(),
@@ -733,6 +884,10 @@ class AppState {
         .toList(),
     'usageEvents': usageEvents.map((item) => item.toJson()).toList(),
     'tagOperations': tagOperations.map((item) => item.toJson()).toList(),
+    'savedQueries': savedQueries.map((item) => item.toJson()).toList(),
+    'pinnedPlacementIds': pinnedPlacementIds.toList(),
+    'hiddenPlacementIds': hiddenPlacementIds.toList(),
+    'logEvents': logEvents.map((item) => item.toJson()).toList(),
   };
 
   factory AppState.fromJson(Map<String, dynamic> json) {
@@ -785,6 +940,20 @@ class AppState {
           .map(
             (item) => TagDomainOperation.fromJson(item as Map<String, dynamic>),
           )
+          .toList(),
+      savedQueries: (json['savedQueries'] as List<dynamic>? ?? const [])
+          .map((item) => SavedQuery.fromJson(item as Map<String, dynamic>))
+          .toList(),
+      pinnedPlacementIds:
+          (json['pinnedPlacementIds'] as List<dynamic>? ?? const [])
+              .cast<String>()
+              .toSet(),
+      hiddenPlacementIds:
+          (json['hiddenPlacementIds'] as List<dynamic>? ?? const [])
+              .cast<String>()
+              .toSet(),
+      logEvents: (json['logEvents'] as List<dynamic>? ?? const [])
+          .map((item) => AppLogEvent.fromJson(item as Map<String, dynamic>))
           .toList(),
     );
   }

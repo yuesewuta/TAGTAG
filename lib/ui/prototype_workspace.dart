@@ -10,12 +10,13 @@ import '../models/tag_models.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
 import 'prototype_dialogs.dart';
+import 'glass.dart';
 import 'tagtag_theme.dart';
 
 typedef ResourceAction = Future<void> Function(TagResource resource);
 
-/// Prototype motion curve (styles.css: cubic-bezier(0.2, 0.7, 0.2, 1)).
-const _motionCurve = Cubic(0.2, 0.7, 0.2, 1);
+/// Liquid Glass motion: springy expo ease-out for slides.
+const _motionCurve = Curves.easeOutExpo;
 
 /// Zeroes the duration when the platform requests reduced motion.
 Duration _motionDuration(BuildContext context, int milliseconds) {
@@ -57,7 +58,6 @@ class PrototypeWorkspace extends StatefulWidget {
     required this.onCreateSpace,
     required this.onOpenConsistency,
     required this.onSettings,
-    required this.onOperationLog,
     required this.onCreateBackup,
     required this.onOpenResource,
     required this.onRevealResource,
@@ -86,7 +86,6 @@ class PrototypeWorkspace extends StatefulWidget {
   final Future<void> Function() onCreateSpace;
   final Future<void> Function() onOpenConsistency;
   final Future<void> Function() onSettings;
-  final Future<void> Function() onOperationLog;
   final Future<void> Function() onCreateBackup;
   final ResourceAction onOpenResource;
   final ResourceAction onRevealResource;
@@ -127,7 +126,7 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
   void _setStatusOpen(bool open) {
     if (open == _statusOpen) return;
     setState(() => _statusOpen = open);
-    _statusAnimation.duration = _motionDuration(context, 220);
+    _statusAnimation.duration = _motionDuration(context, 280);
     if (open) {
       _statusAnimation.forward();
     } else {
@@ -143,8 +142,7 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
       },
       child: Focus(
         autofocus: true,
-        child: ColoredBox(
-          color: _palette(context).surface,
+        child: GlassCanvas(
           child: Column(
             children: [
               _WindowBar(spaceName: controller.activeSpace?.name ?? '标签空间'),
@@ -215,13 +213,19 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                             if (wide)
                               SizedBox(
                                 width: 300,
-                                child: _Inspector(
-                                  controller: controller,
-                                  resource: inspector,
-                                  onClose: null,
-                                  onOpen: widget.onOpenResource,
-                                  onReveal: widget.onRevealResource,
-                                  onEditTags: widget.onAddTag,
+                                child: GlassPanel(
+                                  radius: 0,
+                                  shadow: false,
+                                  specular: false,
+                                  blur: 24,
+                                  child: _Inspector(
+                                    controller: controller,
+                                    resource: inspector,
+                                    onClose: null,
+                                    onOpen: widget.onOpenResource,
+                                    onReveal: widget.onRevealResource,
+                                    onEditTags: widget.onAddTag,
+                                  ),
                                 ),
                               ),
                           ],
@@ -237,7 +241,7 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                                       setState(() => _navigationOpen = false),
                                   child: AnimatedOpacity(
                                     opacity: _navigationOpen ? 1 : 0,
-                                    duration: _motionDuration(context, 200),
+                                    duration: _motionDuration(context, 280),
                                     curve: _motionCurve,
                                     child: ColoredBox(
                                       color: Colors.black.withValues(
@@ -262,7 +266,7 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                                   offset: _navigationOpen
                                       ? Offset.zero
                                       : const Offset(-1.05, 0),
-                                  duration: _motionDuration(context, 200),
+                                  duration: _motionDuration(context, 280),
                                   curve: _motionCurve,
                                   child: _Navigation(
                                     controller: controller,
@@ -296,20 +300,23 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                                   offset: _inspectorOpen
                                       ? Offset.zero
                                       : const Offset(1.05, 0),
-                                  duration: _motionDuration(context, 200),
+                                  duration: _motionDuration(context, 280),
                                   curve: _motionCurve,
-                                  child: Material(
-                                    elevation: 18,
-                                    color: _palette(context).surfaceSubtle,
-                                    child: _Inspector(
-                                      controller: controller,
-                                      resource: inspector,
-                                      onClose: () => setState(
-                                        () => _inspectorOpen = false,
+                                  child: GlassPanel(
+                                    radius: 0,
+                                    specular: false,
+                                    child: Material(
+                                      type: MaterialType.transparency,
+                                      child: _Inspector(
+                                        controller: controller,
+                                        resource: inspector,
+                                        onClose: () => setState(
+                                          () => _inspectorOpen = false,
+                                        ),
+                                        onOpen: widget.onOpenResource,
+                                        onReveal: widget.onRevealResource,
+                                        onEditTags: widget.onAddTag,
                                       ),
-                                      onOpen: widget.onOpenResource,
-                                      onReveal: widget.onRevealResource,
-                                      onEditTags: widget.onAddTag,
                                     ),
                                   ),
                                 ),
@@ -335,7 +342,10 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                                       setState(() => _statusTab = tab),
                                   onClose: () => _setStatusOpen(false),
                                   onCreateBackup: widget.onCreateBackup,
-                                  onOpenFullLog: widget.onOperationLog,
+                                  onShowFullLog: () {
+                                    _setStatusOpen(false);
+                                    controller.showLog();
+                                  },
                                   onOpenConsistency: widget.onOpenConsistency,
                                 ),
                               ),
@@ -415,6 +425,8 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
         WidgetsBinding.instance.addPostFrameCallback(
           (_) => widget.searchFocusNode.requestFocus(),
         );
+      case ResourceView.log:
+        controller.showLog();
     }
     setState(() => _navigationOpen = false);
   }
@@ -438,67 +450,75 @@ class _WindowBar extends StatelessWidget {
     final palette = _palette(context);
     return SizedBox(
       height: 32,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: palette.navigation,
-          border: Border(bottom: BorderSide(color: palette.border)),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: DragToMoveArea(
-                child: Padding(
-                  padding: const EdgeInsets.only(left: 12),
-                  child: Row(
-                    children: [
-                      const _Logo(size: 20, radius: 4),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'TAGTAG',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (MediaQuery.sizeOf(context).width > 720)
-                        Text(
-                          spaceName,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: palette.textMuted,
+      child: GlassPanel(
+        radius: 0,
+        shadow: false,
+        specular: false,
+        blur: 24,
+        child: ColoredBox(
+          color: Colors.transparent,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: palette.border)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: DragToMoveArea(
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: Row(
+                        children: [
+                          const _Logo(size: 20, radius: 4),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'TAGTAG',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
-                    ],
+                          const SizedBox(width: 8),
+                          if (MediaQuery.sizeOf(context).width > 720)
+                            Text(
+                              spaceName,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: palette.textMuted,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                _CaptionButton(
+                  icon: Icons.remove,
+                  tooltip: '最小化',
+                  onPressed: Platform.isWindows ? windowManager.minimize : null,
+                ),
+                _CaptionButton(
+                  icon: Icons.crop_square,
+                  tooltip: '最大化或还原',
+                  onPressed: Platform.isWindows
+                      ? () async {
+                          if (await windowManager.isMaximized()) {
+                            await windowManager.unmaximize();
+                          } else {
+                            await windowManager.maximize();
+                          }
+                        }
+                      : null,
+                ),
+                _CaptionButton(
+                  icon: Icons.close,
+                  tooltip: '关闭',
+                  destructive: true,
+                  onPressed: Platform.isWindows ? windowManager.close : null,
+                ),
+              ],
             ),
-            _CaptionButton(
-              icon: Icons.remove,
-              tooltip: '最小化',
-              onPressed: Platform.isWindows ? windowManager.minimize : null,
-            ),
-            _CaptionButton(
-              icon: Icons.crop_square,
-              tooltip: '最大化或还原',
-              onPressed: Platform.isWindows
-                  ? () async {
-                      if (await windowManager.isMaximized()) {
-                        await windowManager.unmaximize();
-                      } else {
-                        await windowManager.maximize();
-                      }
-                    }
-                  : null,
-            ),
-            _CaptionButton(
-              icon: Icons.close,
-              tooltip: '关闭',
-              destructive: true,
-              onPressed: Platform.isWindows ? windowManager.close : null,
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -586,120 +606,134 @@ class _Navigation extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = _palette(context);
-    return Material(
-      color: palette.navigation,
-      child: Container(
-        padding: EdgeInsets.fromLTRB(
-          collapsed ? 8 : 10,
-          14,
-          collapsed ? 8 : 10,
-          10,
-        ),
-        decoration: BoxDecoration(
-          border: Border(right: BorderSide(color: palette.border)),
-        ),
-        child: Column(
-          children: [
-            SizedBox(
-              height: 42,
-              child: Row(
-                mainAxisAlignment: collapsed
-                    ? MainAxisAlignment.center
-                    : MainAxisAlignment.start,
-                children: [
-                  const _Logo(size: 32, radius: 6),
-                  if (!collapsed) ...[
-                    const SizedBox(width: 10),
-                    const Expanded(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'TAGTAG',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
+    return GlassPanel(
+      radius: 0,
+      shadow: false,
+      specular: false,
+      blur: 24,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Container(
+          padding: EdgeInsets.fromLTRB(
+            collapsed ? 8 : 10,
+            14,
+            collapsed ? 8 : 10,
+            10,
+          ),
+          decoration: BoxDecoration(
+            border: Border(right: BorderSide(color: palette.border)),
+          ),
+          child: Column(
+            children: [
+              SizedBox(
+                height: 42,
+                child: Row(
+                  mainAxisAlignment: collapsed
+                      ? MainAxisAlignment.center
+                      : MainAxisAlignment.start,
+                  children: [
+                    const _Logo(size: 32, radius: 6),
+                    if (!collapsed) ...[
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'TAGTAG',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
-                          ),
-                          Text('本地资料库', style: TextStyle(fontSize: 11)),
-                        ],
+                            Text('本地资料库', style: TextStyle(fontSize: 11)),
+                          ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
-            ),
-            const SizedBox(height: 10),
-            _SpaceMenu(
-              controller: controller,
-              collapsed: collapsed,
-              onCreateSpace: onCreateSpace,
-            ),
-            const SizedBox(height: 14),
-            if (!collapsed) const _NavHeading('资料库'),
-            _NavButton(
-              key: const ValueKey('nav-全部资源'),
-              icon: Icons.folder_outlined,
-              label: '全部资源',
-              count:
-                  '${controller.visibleResourceCountForSpace(controller.activeSpaceId)}',
-              selected: controller.activeView == ResourceView.all,
-              collapsed: collapsed,
-              onTap: () => onNavigate(ResourceView.all),
-            ),
-            _NavButton(
-              key: const ValueKey('nav-待整理'),
-              icon: Icons.inbox_outlined,
-              label: '待整理',
-              badge:
-                  '${controller.inboxCountForSpace(controller.activeSpaceId)}',
-              selected: controller.activeView == ResourceView.inbox,
-              collapsed: collapsed,
-              onTap: () => onNavigate(ResourceView.inbox),
-            ),
-            _NavButton(
-              key: const ValueKey('nav-最近'),
-              icon: Icons.schedule_outlined,
-              label: '最近',
-              selected: controller.activeView == ResourceView.recent,
-              collapsed: collapsed,
-              onTap: () => onNavigate(ResourceView.recent),
-            ),
-            _NavButton(
-              key: const ValueKey('nav-搜索'),
-              icon: Icons.search,
-              label: '搜索',
-              selected: controller.activeView == ResourceView.search,
-              collapsed: collapsed,
-              onTap: () => onNavigate(ResourceView.search),
-            ),
-            const SizedBox(height: 15),
-            if (!collapsed) const _NavHeading('组织'),
-            _NavButton(
-              key: const ValueKey('nav-标签层级'),
-              icon: Icons.sell_outlined,
-              label: '标签层级',
-              selected: controller.activeView == ResourceView.hierarchy,
-              collapsed: collapsed,
-              onTap: () => onNavigate(ResourceView.hierarchy),
-            ),
-            const Spacer(),
-            Divider(color: palette.border, height: 17),
-            _HealthButton(
-              collapsed: collapsed,
-              findings: findings,
-              expanded: statusExpanded,
-              onTap: onStatus,
-            ),
-            _NavButton(
-              key: const ValueKey('nav-设置'),
-              icon: Icons.settings_outlined,
-              label: '设置',
-              collapsed: collapsed,
-              onTap: () => unawaited(onSettings()),
-            ),
-          ],
+              const SizedBox(height: 10),
+              _SpaceMenu(
+                controller: controller,
+                collapsed: collapsed,
+                onCreateSpace: onCreateSpace,
+              ),
+              const SizedBox(height: 14),
+              if (!collapsed) const _NavHeading('资料库'),
+              _NavButton(
+                key: const ValueKey('nav-全部资源'),
+                icon: Icons.folder_outlined,
+                label: '全部资源',
+                count:
+                    '${controller.visibleResourceCountForSpace(controller.activeSpaceId)}',
+                selected: controller.activeView == ResourceView.all,
+                collapsed: collapsed,
+                onTap: () => onNavigate(ResourceView.all),
+              ),
+              _NavButton(
+                key: const ValueKey('nav-待整理'),
+                icon: Icons.inbox_outlined,
+                label: '待整理',
+                badge:
+                    '${controller.inboxCountForSpace(controller.activeSpaceId)}',
+                selected: controller.activeView == ResourceView.inbox,
+                collapsed: collapsed,
+                onTap: () => onNavigate(ResourceView.inbox),
+              ),
+              _NavButton(
+                key: const ValueKey('nav-最近'),
+                icon: Icons.schedule_outlined,
+                label: '最近',
+                selected: controller.activeView == ResourceView.recent,
+                collapsed: collapsed,
+                onTap: () => onNavigate(ResourceView.recent),
+              ),
+              _NavButton(
+                key: const ValueKey('nav-搜索'),
+                icon: Icons.search,
+                label: '搜索',
+                selected: controller.activeView == ResourceView.search,
+                collapsed: collapsed,
+                onTap: () => onNavigate(ResourceView.search),
+              ),
+              _NavButton(
+                key: const ValueKey('nav-日志'),
+                icon: Icons.receipt_long_outlined,
+                label: '日志',
+                selected: controller.activeView == ResourceView.log,
+                collapsed: collapsed,
+                onTap: () => onNavigate(ResourceView.log),
+              ),
+              const SizedBox(height: 15),
+              if (!collapsed) const _NavHeading('组织'),
+              _NavButton(
+                key: const ValueKey('nav-标签层级'),
+                icon: Icons.sell_outlined,
+                label: '标签层级',
+                selected: controller.activeView == ResourceView.hierarchy,
+                collapsed: collapsed,
+                onTap: () => onNavigate(ResourceView.hierarchy),
+              ),
+              const Spacer(),
+              Divider(color: palette.border, height: 17),
+              _HealthButton(
+                collapsed: collapsed,
+                findings: findings,
+                expanded: statusExpanded,
+                onTap: onStatus,
+              ),
+              _NavButton(
+                key: const ValueKey('nav-设置'),
+                icon: Icons.settings_outlined,
+                label: '设置',
+                collapsed: collapsed,
+                onTap: () => unawaited(onSettings()),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1146,7 +1180,7 @@ class _MainWorkspace extends StatelessWidget {
     final palette = _palette(context);
     final view = controller.activeView;
     return Material(
-      color: palette.surface,
+      type: MaterialType.transparency,
       child: Column(
         children: [
           Container(
@@ -1155,6 +1189,7 @@ class _MainWorkspace extends StatelessWidget {
               horizontal: windowWidth < 720 ? 10 : 18,
             ),
             decoration: BoxDecoration(
+              color: _canvasTint(context),
               border: Border(bottom: BorderSide(color: palette.border)),
             ),
             child: Row(
@@ -1292,7 +1327,15 @@ class _MainWorkspace extends StatelessWidget {
               ],
             ),
           ),
-          if (view == ResourceView.hierarchy)
+          if (view == ResourceView.log)
+            Expanded(
+              child: _LogPanel(
+                key: const ValueKey('log-panel'),
+                controller: controller,
+                windowWidth: windowWidth,
+              ),
+            )
+          else if (view == ResourceView.hierarchy)
             Expanded(
               child: _TagWorkbench(
                 controller: controller,
@@ -1322,6 +1365,10 @@ class _MainWorkspace extends StatelessWidget {
                   searchController.clear();
                   controller.setSearchTerm('');
                   controller.clearSearchFilters();
+                },
+                onApplySavedQuery: (queryId) async {
+                  await controller.applySavedQuery(queryId);
+                  searchController.text = controller.searchTerm;
                 },
               ),
             if (view == ResourceView.inbox)
@@ -1383,7 +1430,7 @@ class _CommandBar extends StatelessWidget {
       height: 46,
       padding: EdgeInsets.fromLTRB(windowWidth < 720 ? 10 : 20, 6, 14, 6),
       decoration: BoxDecoration(
-        color: palette.surfaceSubtle,
+        color: _canvasTint(context),
         border: Border(
           top: BorderSide(color: palette.border),
           bottom: BorderSide(color: palette.border),
@@ -1500,12 +1547,11 @@ class _ResourceTable extends StatelessWidget {
     if (resources.isEmpty) {
       return _EmptyResources(onClear: onClearSearch);
     }
-    final palette = _palette(context);
     return Column(
       children: [
         Container(
           height: 34,
-          color: palette.surfaceSubtle,
+          color: _canvasTint(context),
           child: _TableCells(
             windowWidth: windowWidth,
             checkbox: _TableCheckbox(
@@ -1628,7 +1674,11 @@ class _ResourceTableRowState extends State<_ResourceTableRow> {
                 )
               : null,
           decoration: BoxDecoration(
-            color: widget.inspected ? palette.primarySoft : palette.surface,
+            color: widget.inspected
+                ? palette.primarySoft
+                : _hovered
+                ? _canvasTint(context)
+                : Colors.transparent,
             border: Border(bottom: BorderSide(color: palette.border)),
           ),
           child: _TableCells(
@@ -2041,7 +2091,6 @@ class _Inspector extends StatelessWidget {
     final item = resource;
     return Container(
       decoration: BoxDecoration(
-        color: palette.surfaceSubtle,
         border: Border(left: BorderSide(color: palette.border)),
       ),
       child: Column(
@@ -2412,9 +2461,7 @@ class _TagTreePanelState extends State<_TagTreePanel> {
     });
     widget.controller.selectPlacement(dragged.id);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已更新：${widget.controller.pathOf(dragged.id)}'),
-      ),
+      SnackBar(content: Text('已更新：${widget.controller.pathOf(dragged.id)}')),
     );
   }
 
@@ -2434,12 +2481,28 @@ class _TagTreePanelState extends State<_TagTreePanel> {
     for (final root in controller.rootPlacements) {
       walk(root, 0);
     }
-    setState(() => _expandedIds
-      ..clear()
-      ..addAll(expanded));
+    setState(
+      () => _expandedIds
+        ..clear()
+        ..addAll(expanded),
+    );
   }
 
-  void _expandAll() => _expandToLevels(1 << 30);
+  int _maxTreeLevels() {
+    final controller = widget.controller;
+    var maxDepth = 0;
+    void walk(TagPlacement placement, int depth) {
+      if (depth > maxDepth) maxDepth = depth;
+      for (final child in controller.childrenOf(placement.id)) {
+        walk(child, depth + 1);
+      }
+    }
+
+    for (final root in controller.rootPlacements) {
+      walk(root, 0);
+    }
+    return maxDepth + 1;
+  }
 
   Set<String> _ancestorsOf(TagPlacement? placement) {
     final ancestors = <String>{};
@@ -2500,20 +2563,18 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                 PopupMenuButton<int>(
                   tooltip: '展开层级',
                   icon: const Icon(Icons.unfold_more, size: 18),
-                  onSelected: (levels) {
-                    if (levels <= 0) {
-                      _expandAll();
-                    } else {
-                      _expandToLevels(levels);
-                    }
+                  onSelected: _expandToLevels,
+                  itemBuilder: (context) {
+                    final maxLevels = _maxTreeLevels();
+                    return [
+                      const PopupMenuItem(value: 1, child: Text('仅显示顶层')),
+                      for (var level = 2; level <= maxLevels; level++)
+                        PopupMenuItem(
+                          value: level,
+                          child: Text('展开到第 $level 层'),
+                        ),
+                    ];
                   },
-                  itemBuilder: (context) => const [
-                    PopupMenuItem(value: 1, child: Text('仅显示顶层')),
-                    PopupMenuItem(value: 2, child: Text('展开到第 2 层')),
-                    PopupMenuItem(value: 3, child: Text('展开到第 3 层')),
-                    PopupMenuItem(value: 5, child: Text('展开到第 5 层')),
-                    PopupMenuItem(value: 0, child: Text('全部展开')),
-                  ],
                 ),
               ],
             ),
@@ -2534,10 +2595,8 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                         _expandedIds.add(id);
                       }
                     }),
-                    onDrop: (dragged, target) =>
-                        _dropOn(dragged, target.id),
-                    onDragStateChange: (id) =>
-                        setState(() => _draggingId = id),
+                    onDrop: (dragged, target) => _dropOn(dragged, target.id),
+                    onDragStateChange: (id) => setState(() => _draggingId = id),
                   ),
                 if (_draggingId != null)
                   Padding(
@@ -2851,6 +2910,10 @@ class _TagResultPanel extends StatelessWidget {
                       unawaited(onEditTag(item.id));
                     case _TagMenuAction.reparent:
                       unawaited(_reparent(context, item));
+                    case _TagMenuAction.togglePin:
+                      unawaited(_togglePin(context, item));
+                    case _TagMenuAction.toggleHide:
+                      unawaited(_toggleHide(context, item));
                     case _TagMenuAction.merge:
                       unawaited(onMergeTag(item.id));
                     case _TagMenuAction.split:
@@ -2859,33 +2922,45 @@ class _TagResultPanel extends StatelessWidget {
                       unawaited(onDeleteTag(item.id));
                   }
                 },
-                itemBuilder: (context) => const [
-                  PopupMenuItem(
+                itemBuilder: (context) => [
+                  const PopupMenuItem(
                     value: _TagMenuAction.addRoot,
                     child: Text('新建根标签'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: _TagMenuAction.addChild,
                     child: Text('新建子标签'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: _TagMenuAction.edit,
                     child: Text('编辑标签'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: _TagMenuAction.reparent,
                     child: Text('更改上级标签…'),
                   ),
                   PopupMenuItem(
+                    value: _TagMenuAction.togglePin,
+                    child: Text(
+                      controller.isPlacementPinned(item.id) ? '取消固定' : '固定到常用',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: _TagMenuAction.toggleHide,
+                    child: Text(
+                      controller.isPlacementHidden(item.id) ? '取消隐藏' : '从常用隐藏',
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: _TagMenuAction.merge,
                     child: Text('合并标签'),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
                     value: _TagMenuAction.split,
                     child: Text('拆分标签'),
                   ),
-                  PopupMenuDivider(),
-                  PopupMenuItem(
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
                     value: _TagMenuAction.delete,
                     child: Text('删除标签'),
                   ),
@@ -2980,6 +3055,38 @@ class _TagResultPanel extends StatelessWidget {
     );
   }
 
+  Future<void> _togglePin(BuildContext context, TagPlacement placement) async {
+    final pinned = controller.isPlacementPinned(placement.id);
+    await controller.togglePlacementPinned(placement.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            pinned
+                ? '已取消固定“${controller.tagForPlacement(placement).name}”'
+                : '已把“${controller.tagForPlacement(placement).name}”固定到常用标签',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _toggleHide(BuildContext context, TagPlacement placement) async {
+    final hidden = controller.isPlacementHidden(placement.id);
+    await controller.togglePlacementHidden(placement.id);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            hidden
+                ? '已取消隐藏“${controller.tagForPlacement(placement).name}”'
+                : '已从常用标签隐藏“${controller.tagForPlacement(placement).name}”',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _reparent(BuildContext context, TagPlacement placement) async {
     final updated = await showReparentTagDialog(
       context,
@@ -3003,10 +3110,12 @@ class _SearchFilterStrip extends StatelessWidget {
     required this.controller,
     required this.windowWidth,
     required this.onClearSearch,
+    required this.onApplySavedQuery,
   });
   final TagTagController controller;
   final double windowWidth;
   final VoidCallback onClearSearch;
+  final Future<void> Function(String queryId) onApplySavedQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -3015,6 +3124,7 @@ class _SearchFilterStrip extends StatelessWidget {
         .where((tag) => tag.spaceId == controller.activeSpaceId)
         .take(3)
         .toList();
+    final savedQueries = controller.savedQueriesInActiveSpace;
     return Container(
       height: 46,
       padding: EdgeInsets.symmetric(
@@ -3046,7 +3156,152 @@ class _SearchFilterStrip extends StatelessWidget {
             _FilterChip(controller: controller, tag: tag),
             const SizedBox(width: 8),
           ],
+          for (final query in savedQueries) ...[
+            _SavedQueryChip(
+              query: query,
+              onApply: () => unawaited(onApplySavedQuery(query.id)),
+              onDelete: () => unawaited(controller.deleteSavedQuery(query.id)),
+            ),
+            const SizedBox(width: 8),
+          ],
+          TextButton.icon(
+            key: const ValueKey('save-search-query'),
+            onPressed: controller.hasActiveSearchCondition
+                ? () => unawaited(_saveCurrentQuery(context))
+                : null,
+            icon: const Icon(Icons.bookmark_add_outlined, size: 15),
+            label: const Text('保存查询'),
+          ),
           TextButton(onPressed: onClearSearch, child: const Text('清除')),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveCurrentQuery(BuildContext context) async {
+    final name = await _promptQueryName(context);
+    if (name == null || !context.mounted) {
+      return;
+    }
+    try {
+      final saved = await controller.saveCurrentSearch(name);
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已保存查询“${saved.name}”')));
+      }
+    } on ArgumentError {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('查询名称不能为空')));
+      }
+    }
+  }
+
+  Future<String?> _promptQueryName(BuildContext context) {
+    final nameController = TextEditingController();
+    final theme = Theme.of(context);
+    return showDialog<String>(
+      context: context,
+      barrierColor: const Color(0x7a10161f),
+      builder: (dialogContext) => Theme(
+        data: theme,
+        child: PrototypeDialogFrame(
+          width: 420,
+          desktopHeight: null,
+          icon: Icons.bookmark_add_outlined,
+          title: '保存查询',
+          subtitle: '把当前搜索条件保存到当前空间',
+          body: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+            child: SizedBox(
+              height: 34,
+              child: TextField(
+                controller: nameController,
+                autofocus: true,
+                decoration: const InputDecoration(hintText: '查询名称'),
+                onSubmitted: (value) => Navigator.pop(dialogContext, value),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('取消'),
+            ),
+            GlassPrimaryButton.icon(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, nameController.text),
+              icon: const Icon(Icons.check, size: 17),
+              label: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SavedQueryChip extends StatelessWidget {
+  const _SavedQueryChip({
+    required this.query,
+    required this.onApply,
+    required this.onDelete,
+  });
+  final SavedQuery query;
+  final VoidCallback onApply;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _palette(context);
+    return Container(
+      height: 28,
+      decoration: BoxDecoration(
+        color: palette.surface,
+        border: Border.all(color: palette.borderStrong),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            key: ValueKey('saved-query-${query.id}'),
+            onTap: onApply,
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(4),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(left: 9, right: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.bookmark_outline,
+                    size: 12,
+                    color: palette.textMuted,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    query.name,
+                    style: TextStyle(fontSize: 12, color: palette.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          InkWell(
+            key: ValueKey('delete-saved-query-${query.id}'),
+            onTap: onDelete,
+            borderRadius: const BorderRadius.horizontal(
+              right: Radius.circular(4),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Icon(Icons.close, size: 13, color: palette.textFaint),
+            ),
+          ),
         ],
       ),
     );
@@ -3192,7 +3447,7 @@ class _StatusDrawer extends StatelessWidget {
     required this.onTabSelected,
     required this.onClose,
     required this.onCreateBackup,
-    required this.onOpenFullLog,
+    required this.onShowFullLog,
     required this.onOpenConsistency,
   });
 
@@ -3202,105 +3457,108 @@ class _StatusDrawer extends StatelessWidget {
   final ValueChanged<_StatusTab> onTabSelected;
   final VoidCallback onClose;
   final Future<void> Function() onCreateBackup;
-  final Future<void> Function() onOpenFullLog;
+  final VoidCallback onShowFullLog;
   final Future<void> Function() onOpenConsistency;
 
   @override
   Widget build(BuildContext context) {
     final palette = _palette(context);
-    return Material(
-      elevation: 18,
-      color: palette.surfaceRaised,
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: palette.border)),
-        ),
-        child: Column(
-          children: [
-            Container(
-              height: 70,
-              padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: palette.border)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: TagTagColors.success,
-                      shape: BoxShape.circle,
+    return GlassPanel(
+      radius: 0,
+      specular: false,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Container(
+          decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: palette.border)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                height: 70,
+                padding: const EdgeInsets.fromLTRB(18, 12, 14, 12),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: palette.border)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: TagTagColors.success,
+                        shape: BoxShape.circle,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 11),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '资料库状态',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+                    const SizedBox(width: 11),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '资料库状态',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
-                        ),
-                        Text(
-                          controller.storageRoot?.path ?? '存储根尚未初始化',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: palette.textMuted,
+                          Text(
+                            controller.storageRoot?.path ?? '存储根尚未初始化',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: palette.textMuted,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                  _SmallIconButton(
-                    icon: Icons.close,
-                    tooltip: '关闭状态中心',
-                    onPressed: onClose,
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              height: 43,
-              padding: const EdgeInsets.symmetric(horizontal: 18),
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: palette.border)),
-              ),
-              child: Row(
-                children: [
-                  _DrawerTab(
-                    label: '健康状态',
-                    selected: selectedTab == _StatusTab.health,
-                    onTap: () => onTabSelected(_StatusTab.health),
-                  ),
-                  const SizedBox(width: 18),
-                  _DrawerTab(
-                    label: '操作日志',
-                    selected: selectedTab == _StatusTab.history,
-                    onTap: () => onTabSelected(_StatusTab.history),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: selectedTab == _StatusTab.health
-                  ? _HealthPanel(
-                      controller: controller,
-                      findings: findings,
-                      onCreateBackup: onCreateBackup,
-                      onOpenConsistency: onOpenConsistency,
-                    )
-                  : _HistoryPanel(
-                      controller: controller,
-                      onOpenFullLog: onOpenFullLog,
+                    _SmallIconButton(
+                      icon: Icons.close,
+                      tooltip: '关闭状态中心',
+                      onPressed: onClose,
                     ),
-            ),
-          ],
+                  ],
+                ),
+              ),
+              Container(
+                height: 43,
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: palette.border)),
+                ),
+                child: Row(
+                  children: [
+                    _DrawerTab(
+                      label: '健康状态',
+                      selected: selectedTab == _StatusTab.health,
+                      onTap: () => onTabSelected(_StatusTab.health),
+                    ),
+                    const SizedBox(width: 18),
+                    _DrawerTab(
+                      label: '操作日志',
+                      selected: selectedTab == _StatusTab.history,
+                      onTap: () => onTabSelected(_StatusTab.history),
+                    ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: selectedTab == _StatusTab.health
+                    ? _HealthPanel(
+                        controller: controller,
+                        findings: findings,
+                        onCreateBackup: onCreateBackup,
+                        onOpenConsistency: onOpenConsistency,
+                      )
+                    : _HistoryPanel(
+                        controller: controller,
+                        onShowFullLog: onShowFullLog,
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -3481,9 +3739,9 @@ class _HealthPanel extends StatelessWidget {
 }
 
 class _HistoryPanel extends StatefulWidget {
-  const _HistoryPanel({required this.controller, required this.onOpenFullLog});
+  const _HistoryPanel({required this.controller, required this.onShowFullLog});
   final TagTagController controller;
-  final Future<void> Function() onOpenFullLog;
+  final VoidCallback onShowFullLog;
 
   @override
   State<_HistoryPanel> createState() => _HistoryPanelState();
@@ -3491,8 +3749,6 @@ class _HistoryPanel extends StatefulWidget {
 
 class _HistoryPanelState extends State<_HistoryPanel> {
   late Future<List<ManagedOperation>> _managedOperations;
-  String? _undoingId;
-  String? _error;
 
   @override
   void initState() {
@@ -3517,21 +3773,9 @@ class _HistoryPanelState extends State<_HistoryPanel> {
           for (final operation in widget.controller.tagOperations)
             _HistoryEntry.tag(operation),
         ]..sort((first, second) => second.createdAt.compareTo(first.createdAt));
-        final latestActiveTagId = widget.controller.tagOperations
-            .where((operation) => operation.undoneAt == null)
-            .map((operation) => operation.id)
-            .firstOrNull;
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
           children: [
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  _error!,
-                  style: const TextStyle(color: TagTagColors.destructive),
-                ),
-              ),
             if (entries.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 30),
@@ -3544,20 +3788,20 @@ class _HistoryPanelState extends State<_HistoryPanel> {
                   title: entry.title,
                   subtitle: entry.subtitle,
                   undone: entry.undone,
-                  undoing: _undoingId == entry.id,
                   showConnector: index < entries.take(8).length - 1,
-                  onUndo:
-                      entry.undone ||
-                          _undoingId != null ||
-                          entry.tagOperation && entry.id != latestActiveTagId
-                      ? null
-                      : () => _undo(entry),
                 ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: () => unawaited(widget.onOpenFullLog()),
+              onPressed: widget.onShowFullLog,
               icon: const Icon(Icons.history_outlined, size: 17),
-              label: const Text('查看完整操作日志'),
+              label: const Text('查看全部日志'),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              key: const ValueKey('clear-usage-history'),
+              onPressed: () => unawaited(_confirmClearHistory(context)),
+              icon: const Icon(Icons.delete_sweep_outlined, size: 17),
+              label: const Text('清空历史记录'),
             ),
           ],
         );
@@ -3565,28 +3809,36 @@ class _HistoryPanelState extends State<_HistoryPanel> {
     );
   }
 
-  Future<void> _undo(_HistoryEntry entry) async {
-    setState(() {
-      _undoingId = entry.id;
-      _error = null;
-    });
-    try {
-      if (entry.tagOperation) {
-        await widget.controller.undoTagOperation(entry.id);
-      } else {
-        await widget.controller.undoOperation(entry.id);
-      }
-      if (!mounted) return;
-      setState(() {
-        _undoingId = null;
-        _managedOperations = widget.controller.listOperations();
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _undoingId = null;
-        _error = '撤销失败：$error';
-      });
+  Future<void> _confirmClearHistory(BuildContext context) async {
+    final theme = Theme.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => Theme(
+        data: theme,
+        child: AlertDialog(
+          title: const Text('清空历史记录？'),
+          content: const Text('仅清除当前空间的最近使用与常用标签记录，操作日志不受影响。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('取消'),
+            ),
+            GlassPrimaryButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('清空'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true || !context.mounted) {
+      return;
+    }
+    await widget.controller.clearUsageHistory();
+    if (context.mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已清空当前空间的历史记录')));
     }
   }
 }
@@ -3672,17 +3924,13 @@ class _TimelineItem extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.undone,
-    required this.undoing,
     required this.showConnector,
-    required this.onUndo,
   });
   final IconData icon;
   final String title;
   final String subtitle;
   final bool undone;
-  final bool undoing;
   final bool showConnector;
-  final VoidCallback? onUndo;
 
   @override
   Widget build(BuildContext context) {
@@ -3739,14 +3987,7 @@ class _TimelineItem extends StatelessWidget {
               Text(
                 '已撤销',
                 style: TextStyle(fontSize: 11, color: palette.textFaint),
-              )
-            else if (undoing)
-              const SizedBox.square(
-                dimension: 17,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else if (onUndo != null)
-              TextButton(onPressed: onUndo, child: const Text('撤销')),
+              ),
           ],
         ),
       ),
@@ -3843,38 +4084,33 @@ class _DropOverlay extends StatelessWidget {
           decoration: BoxDecoration(
             color: palette.primary.withValues(alpha: 0.12),
             border: Border.all(color: palette.primary, width: 2),
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(16),
           ),
           alignment: Alignment.center,
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: palette.surface,
-              border: Border.all(color: palette.border),
-              borderRadius: BorderRadius.circular(7),
-              boxShadow: const [
-                BoxShadow(blurRadius: 30, color: Colors.black26),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.file_upload_outlined,
-                  size: 28,
-                  color: palette.primary,
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  '释放以导入并标注',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  count > 0 ? '$count 个资源' : '资源将进入导入确认窗口',
-                  style: TextStyle(fontSize: 12, color: palette.textMuted),
-                ),
-              ],
+          child: GlassPanel(
+            radius: GlassTokens.cardRadius,
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.file_upload_outlined,
+                    size: 28,
+                    color: palette.primary,
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    '释放以导入并标注',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    count > 0 ? '$count 个资源' : '资源将进入导入确认窗口',
+                    style: TextStyle(fontSize: 12, color: palette.textMuted),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -3920,18 +4156,14 @@ class _PrototypeButton extends StatelessWidget {
     final child = SizedBox(
       height: 34,
       child: primary
-          ? FilledButton.icon(
+          ? GlassPrimaryButton.icon(
               onPressed: onPressed,
               icon: icon == null
                   ? const SizedBox.shrink()
                   : Icon(icon, size: 17),
               label: label == null ? const SizedBox.shrink() : Text(label!),
-              style: FilledButton.styleFrom(
-                minimumSize: Size(label == null ? 34 : 44, 34),
-                padding: EdgeInsets.symmetric(
-                  horizontal: label == null ? 8 : 12,
-                ),
-              ),
+              minimumSize: Size(label == null ? 34 : 44, 34),
+              padding: EdgeInsets.symmetric(horizontal: label == null ? 8 : 12),
             )
           : OutlinedButton.icon(
               onPressed: onPressed,
@@ -3991,7 +4223,17 @@ enum _ResourceMenuAction { reveal, addTag, clearTags, restore, move, recycle }
 
 enum _ImportMenuAction { files, folder }
 
-enum _TagMenuAction { addRoot, addChild, edit, reparent, merge, split, delete }
+enum _TagMenuAction {
+  addRoot,
+  addChild,
+  edit,
+  reparent,
+  togglePin,
+  toggleHide,
+  merge,
+  split,
+  delete,
+}
 
 class _Palette {
   const _Palette({
@@ -4026,11 +4268,13 @@ _Palette _palette(BuildContext context) {
   final dark = Theme.of(context).brightness == Brightness.dark;
   return _Palette(
     primary: dark ? const Color(0xff7da6ff) : TagTagColors.primary,
-    primarySoft: dark ? const Color(0xff1b2c4f) : TagTagColors.primarySoft,
+    primarySoft: dark
+        ? const Color(0xff1b2c4f).withValues(alpha: 0.55)
+        : TagTagColors.primarySoft.withValues(alpha: 0.60),
     text: dark ? const Color(0xffedf1f7) : TagTagColors.foreground,
     textMuted: dark ? const Color(0xffaab4c2) : TagTagColors.secondaryText,
-    textFaint: dark ? const Color(0xff8792a0) : TagTagColors.textFaint,
-    canvas: dark ? const Color(0xff171a1f) : TagTagColors.canvas,
+    textFaint: dark ? const Color(0xff9aa4b2) : TagTagColors.textFaint,
+    canvas: dark ? const Color(0xff101216) : const Color(0xffedf0f5),
     navigation: dark ? const Color(0xff1d2128) : TagTagColors.navigation,
     surface: dark ? const Color(0xff22262e) : TagTagColors.surface,
     surfaceSubtle: dark ? const Color(0xff1d2128) : TagTagColors.surfaceSubtle,
@@ -4040,12 +4284,20 @@ _Palette _palette(BuildContext context) {
   );
 }
 
+/// Translucent fill for flat strips (command bar, table header) that sit on
+/// the layered canvas — glassy without paying for another BackdropFilter.
+Color _canvasTint(BuildContext context) =>
+    Theme.of(context).brightness == Brightness.dark
+    ? Colors.white.withValues(alpha: 0.04)
+    : Colors.white.withValues(alpha: 0.35);
+
 String _viewTitle(ResourceView view) => switch (view) {
   ResourceView.all => '全部资源',
   ResourceView.hierarchy => '标签层级',
   ResourceView.inbox => '待整理',
   ResourceView.recent => '最近',
   ResourceView.search => '搜索',
+  ResourceView.log => '日志',
 };
 
 String _viewSubtitle(TagTagController controller) =>
@@ -4055,6 +4307,7 @@ String _viewSubtitle(TagTagController controller) =>
       ResourceView.inbox => '没有有效标签的受管资源',
       ResourceView.recent => '最近打开、导入和标注的资源',
       ResourceView.search => '按名称、路径、类型、时间和标签组合检索',
+      ResourceView.log => '应用内的全部操作与变更记录',
     };
 
 String _resourceType(TagResource resource) {
@@ -4256,7 +4509,7 @@ class _ReparentTagDialogState extends State<_ReparentTagDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('取消'),
         ),
-        FilledButton(
+        GlassPrimaryButton(
           onPressed: changed ? _apply : null,
           child: const Text('应用'),
         ),
@@ -4277,4 +4530,332 @@ class _ReparentTagDialogState extends State<_ReparentTagDialog> {
       }
     }
   }
+}
+
+class _LogPanel extends StatefulWidget {
+  const _LogPanel({
+    super.key,
+    required this.controller,
+    required this.windowWidth,
+  });
+
+  final TagTagController controller;
+  final double windowWidth;
+
+  @override
+  State<_LogPanel> createState() => _LogPanelState();
+}
+
+class _LogPanelState extends State<_LogPanel> {
+  final TextEditingController _keywordController = TextEditingController();
+  LogLevel? _level;
+  LogCategory? _category;
+
+  static const _levelLabels = {
+    LogLevel.info: '信息',
+    LogLevel.notice: '提醒',
+    LogLevel.warning: '警告',
+  };
+
+  static const _categoryLabels = {
+    LogCategory.resource: '资源',
+    LogCategory.tag: '标签',
+    LogCategory.settings: '设置',
+    LogCategory.consistency: '一致性',
+  };
+
+  @override
+  void dispose() {
+    _keywordController.dispose();
+    super.dispose();
+  }
+
+  Color _levelColor(LogLevel level) => switch (level) {
+    LogLevel.info => _palette(context).primary,
+    LogLevel.notice => TagTagColors.warning,
+    LogLevel.warning => TagTagColors.destructive,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _palette(context);
+    final narrow = widget.windowWidth < 720;
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: EdgeInsets.symmetric(
+            horizontal: narrow ? 12 : 20,
+            vertical: 10,
+          ),
+          decoration: BoxDecoration(
+            color: _canvasTint(context),
+            border: Border(bottom: BorderSide(color: palette.border)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: 34,
+                  child: TextField(
+                    controller: _keywordController,
+                    onChanged: (_) => setState(() {}),
+                    style: const TextStyle(fontSize: 13),
+                    decoration: const InputDecoration(
+                      hintText: '筛选日志内容',
+                      prefixIcon: Icon(Icons.search, size: 17),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _LogFilterMenu<LogLevel>(
+                key: const ValueKey('log-filter-level'),
+                currentLabel: _level == null ? '全部级别' : _levelLabels[_level]!,
+                currentColor: _level == null ? null : _levelColor(_level!),
+                entries: [
+                  (value: null, label: '全部级别', color: null),
+                  for (final level in LogLevel.values)
+                    (
+                      value: level,
+                      label: _levelLabels[level]!,
+                      color: _levelColor(level),
+                    ),
+                ],
+                onSelected: (value) => setState(() => _level = value),
+              ),
+              const SizedBox(width: 8),
+              _LogFilterMenu<LogCategory>(
+                key: const ValueKey('log-filter-category'),
+                currentLabel: _category == null
+                    ? '全部类别'
+                    : _categoryLabels[_category]!,
+                currentColor: null,
+                entries: [
+                  (value: null, label: '全部类别', color: null),
+                  for (final category in LogCategory.values)
+                    (
+                      value: category,
+                      label: _categoryLabels[category]!,
+                      color: null,
+                    ),
+                ],
+                onSelected: (value) => setState(() => _category = value),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: FutureBuilder<List<LogEntry>>(
+            future: widget.controller.listLogEntries(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError) {
+                return Center(child: Text('读取日志失败：${snapshot.error}'));
+              }
+              final keyword = _keywordController.text.trim().toLowerCase();
+              final entries = (snapshot.data ?? const <LogEntry>[]).where((
+                entry,
+              ) {
+                if (_level != null && entry.level != _level) return false;
+                if (_category != null && entry.category != _category) {
+                  return false;
+                }
+                if (keyword.isNotEmpty &&
+                    !entry.summary.toLowerCase().contains(keyword)) {
+                  return false;
+                }
+                return true;
+              }).toList();
+              if (entries.isEmpty) {
+                return Center(
+                  child: Text(
+                    keyword.isEmpty && _level == null && _category == null
+                        ? '暂无日志记录'
+                        : '没有匹配的日志',
+                    style: TextStyle(fontSize: 13, color: palette.textMuted),
+                  ),
+                );
+              }
+              return ListView.builder(
+                padding: EdgeInsets.symmetric(
+                  horizontal: narrow ? 12 : 20,
+                  vertical: 6,
+                ),
+                itemCount: entries.length,
+                itemBuilder: (context, index) {
+                  final entry = entries[index];
+                  final color = _levelColor(entry.level);
+                  return Container(
+                    height: 46,
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: palette.border)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: color,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            _levelLabels[entry.level]!,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: color,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _categoryLabels[entry.category]!,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: palette.textFaint,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            entry.summary,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                        if (!narrow) ...[
+                          const SizedBox(width: 10),
+                          Text(
+                            entry.spaceName == null
+                                ? _formatLogTime(entry.timestamp)
+                                : '${entry.spaceName} · ${_formatLogTime(entry.timestamp)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: palette.textFaint,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _LogFilterMenu<T> extends StatelessWidget {
+  const _LogFilterMenu({
+    super.key,
+    required this.currentLabel,
+    required this.currentColor,
+    required this.entries,
+    required this.onSelected,
+  });
+
+  final String currentLabel;
+  final Color? currentColor;
+  final List<({T? value, String label, Color? color})> entries;
+  final ValueChanged<T?> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _palette(context);
+    final active =
+        currentColor != null ||
+        entries.indexWhere((entry) => entry.label == currentLabel) > 0;
+    return PopupMenuButton<int>(
+      tooltip: currentLabel,
+      onSelected: (index) => onSelected(entries[index].value),
+      itemBuilder: (context) => [
+        for (final (index, entry) in entries.indexed)
+          PopupMenuItem<int>(
+            value: index,
+            child: Row(
+              children: [
+                if (entry.color != null) ...[
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: entry.color,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                Text(entry.label),
+              ],
+            ),
+          ),
+      ],
+      child: Container(
+        height: 30,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.only(left: 12, right: 6),
+        decoration: BoxDecoration(
+          color: active && currentColor != null
+              ? currentColor!.withValues(alpha: 0.14)
+              : Colors.transparent,
+          border: Border.all(
+            color: active && currentColor != null
+                ? currentColor!
+                : palette.border,
+          ),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (currentColor != null) ...[
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: currentColor,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              currentLabel,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w400,
+                color: active && currentColor != null
+                    ? currentColor
+                    : palette.textMuted,
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, size: 16, color: palette.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _formatLogTime(DateTime value) {
+  String two(int unit) => unit.toString().padLeft(2, '0');
+  return '${value.month}月${value.day}日 ${two(value.hour)}:${two(value.minute)}';
 }

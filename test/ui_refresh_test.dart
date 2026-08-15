@@ -8,6 +8,7 @@ import 'package:tagtag/models/tag_models.dart';
 import 'package:tagtag/platform/windows_file_actions.dart';
 import 'package:tagtag/state/tagtag_controller.dart';
 import 'package:tagtag/ui/home_screen.dart';
+import 'package:tagtag/ui/prototype_dialogs.dart';
 import 'package:tagtag/ui/tagtag_theme.dart';
 
 void main() {
@@ -128,7 +129,7 @@ void main() {
     expect(find.text('个人'), findsOneWidget);
     await tester.tap(find.byTooltip('展开层级'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('全部展开'));
+    await tester.tap(find.text('展开到第 3 层'));
     await tester.pumpAndSettle();
     expect(find.text('阅读'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -217,6 +218,84 @@ void main() {
 
     expect(placementOf('place-project-design').parentId, 'place-personal');
     expect(find.textContaining('已更新：'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('log page filters entries by level, category, and keyword', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+    await tester.runAsync(() async {
+      await fixture.controller.createPlacement(name: '筛选目标', colorValue: 0);
+      await fixture.controller.updatePreferences(appearanceTheme: 'dark');
+    });
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    await tester.tap(find.byKey(const ValueKey('nav-日志')));
+    await tester.pumpAndSettle();
+
+    final panel = find.byKey(const ValueKey('log-panel'));
+    expect(panel, findsOneWidget);
+    expect(find.textContaining('新建标签“筛选目标”'), findsOneWidget);
+    expect(find.textContaining('更新设置：外观 深色'), findsOneWidget);
+
+    // Category filter composes (via the compact dropdown).
+    await tester.tap(find.byKey(const ValueKey('log-filter-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('设置').last);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('新建标签“筛选目标”'), findsNothing);
+    expect(find.textContaining('更新设置：外观 深色'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('log-filter-category')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('全部类别').last);
+    await tester.pumpAndSettle();
+
+    // Keyword filter.
+    await tester.enterText(find.widgetWithText(TextField, '筛选日志内容'), '筛选目标');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('新建标签“筛选目标”'), findsOneWidget);
+    expect(find.textContaining('更新设置：外观 深色'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('dialogs follow the selected dark appearance', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+    await tester.runAsync(
+      () => fixture.controller.updatePreferences(appearanceTheme: 'dark'),
+    );
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    await tester.tap(find.byTooltip('快速标注'));
+    await tester.pumpAndSettle();
+
+    final dialog = find.byType(PrototypeQuickTagDialog);
+    expect(dialog, findsOneWidget);
+    expect(
+      Theme.of(tester.element(dialog)).brightness,
+      Brightness.dark,
+      reason: 'dialogs must inherit the selected dark theme',
+    );
+    // Tooltips stay readable in dark mode (dark background, light text).
+    final tooltipTheme = Theme.of(tester.element(dialog)).tooltipTheme;
+    final decoration = tooltipTheme.decoration as BoxDecoration;
+    expect(decoration.color, TagTagColors.foreground);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());

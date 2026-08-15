@@ -62,6 +62,11 @@ class _TagTagHomeState extends State<TagTagHome> {
 
   TagTagController get controller => widget.controller;
 
+  // Context below the appearance Theme override; dialog routes are inserted
+  // into the root navigator, so calls must start from here to keep the
+  // selected brightness.
+  late BuildContext _dialogContext;
+
   @override
   void initState() {
     super.initState();
@@ -110,68 +115,74 @@ class _TagTagHomeState extends State<TagTagHome> {
         : Brightness.light;
     return Theme(
       data: buildTagTagTheme(brightness: brightness),
-      child: CallbackShortcuts(
-        bindings: {
-          _quickTagActivator(controller.preferences.quickTagShortcut):
-              _showQuickTag,
-          const SingleActivator(LogicalKeyboardKey.keyK, control: true):
-              _focusSearch,
-        },
-        child: Scaffold(
-          body: DropTarget(
-            enable: !_importDialogOpen,
-            onDragEntered: (_) => setState(() => _dragging = true),
-            onDragExited: (_) => setState(() => _dragging = false),
-            onDragDone: (details) {
-              setState(() {
-                _dragging = false;
-                _draggingCount = details.files.length;
-              });
-              unawaited(
-                _handleDroppedPaths(details.files.map((item) => item.path)),
-              );
+      child: Builder(
+        builder: (themedContext) {
+          _dialogContext = themedContext;
+          return CallbackShortcuts(
+            bindings: {
+              _quickTagActivator(controller.preferences.quickTagShortcut):
+                  _showQuickTag,
+              const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+                  _focusSearch,
             },
-            child: AnimatedBuilder(
-              animation: controller,
-              builder: (context, _) => PrototypeWorkspace(
-                controller: controller,
-                searchController: _searchController,
-                searchFocusNode: _searchFocusNode,
-                comfortableDensity: _interfaceDensity == 'comfortable',
-                dragging: _dragging,
-                draggingCount: _draggingCount,
-                consistencyFindings: _consistencyFindings,
-                onQuickTag: _showQuickTag,
-                onImport: () => _chooseImportSource(_ImportSourceKind.files),
-                onImportFolder: () =>
-                    _chooseImportSource(_ImportSourceKind.folder),
-                onCreateSpace: _showCreateSpace,
-                onOpenConsistency: _showConsistencyFindings,
-                onSettings: _showSettings,
-                onOperationLog: _showOperationLog,
-                onCreateBackup: _createBackup,
-                onOpenResource: _openResource,
-                onRevealResource: _revealResource,
-                onAddTag: _addTagToResource,
-                onClearTags: _clearTagsForResource,
-                onRestoreResource: _restoreResource,
-                onMoveResource: _moveResourceToSpecifiedPath,
-                onRecycleResource: _recycleResource,
-                onCreateTag: (parentId) => _showCreateTag(parentId: parentId),
-                onEditTag: (placementId) async {
-                  controller.selectPlacement(placementId);
-                  await _editActiveTag();
+            child: Scaffold(
+              body: DropTarget(
+                enable: !_importDialogOpen,
+                onDragEntered: (_) => setState(() => _dragging = true),
+                onDragExited: (_) => setState(() => _dragging = false),
+                onDragDone: (details) {
+                  setState(() {
+                    _dragging = false;
+                    _draggingCount = details.files.length;
+                  });
+                  unawaited(
+                    _handleDroppedPaths(details.files.map((item) => item.path)),
+                  );
                 },
-                onMergeTag: _showMergeTag,
-                onSplitTag: _showSplitTag,
-                onDeleteTag: (placementId) async {
-                  controller.selectPlacement(placementId);
-                  await _deleteActiveTag();
-                },
+                child: AnimatedBuilder(
+                  animation: controller,
+                  builder: (context, _) => PrototypeWorkspace(
+                    controller: controller,
+                    searchController: _searchController,
+                    searchFocusNode: _searchFocusNode,
+                    comfortableDensity: _interfaceDensity == 'comfortable',
+                    dragging: _dragging,
+                    draggingCount: _draggingCount,
+                    consistencyFindings: _consistencyFindings,
+                    onQuickTag: _showQuickTag,
+                    onImport: () =>
+                        _chooseImportSource(_ImportSourceKind.files),
+                    onImportFolder: () =>
+                        _chooseImportSource(_ImportSourceKind.folder),
+                    onCreateSpace: _showCreateSpace,
+                    onOpenConsistency: _showConsistencyFindings,
+                    onSettings: _showSettings,
+                    onCreateBackup: _createBackup,
+                    onOpenResource: _openResource,
+                    onRevealResource: _revealResource,
+                    onAddTag: _addTagToResource,
+                    onClearTags: _clearTagsForResource,
+                    onRestoreResource: _restoreResource,
+                    onMoveResource: _moveResourceToSpecifiedPath,
+                    onRecycleResource: _recycleResource,
+                    onCreateTag: (parentId) =>
+                        _showCreateTag(parentId: parentId),
+                    onEditTag: (placementId) async {
+                      controller.selectPlacement(placementId);
+                      await _editActiveTag();
+                    },
+                    onMergeTag: _showMergeTag,
+                    onSplitTag: _showSplitTag,
+                    onDeleteTag: (placementId) async {
+                      controller.selectPlacement(placementId);
+                      await _deleteActiveTag();
+                    },
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -189,7 +200,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     final previousTheme = _appearanceTheme;
     final previousDensity = _interfaceDensity;
     final result = await showPrototypeDialog<PrototypeSettingsResult>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => PrototypeSettingsDialog(
         controller: controller,
         quickTagRegistered: _quickTagRegistered,
@@ -312,7 +323,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           return;
         }
         final choice = await showPrototypeDialog<_MoveConflictChoice>(
-          context: context,
+          context: _dialogContext,
           builder: (context) => AlertDialog(
             title: const Text('目标位置存在同名资源'),
             content: Text(
@@ -374,8 +385,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       final confirmed = await _confirm(
         title: '移动到指定位置并退出管理？',
         message:
-            '“${resource.name}”将移动到“$destinationPath”，并从 TAGTAG 删除标签和空间关系。'
-            '成功后可在操作日志中撤销。',
+            '“${resource.name}”将移动到“$destinationPath”，并从 TAGTAG 删除标签和空间关系。',
         actionLabel: '移动并退出',
       );
       if (!confirmed) {
@@ -395,8 +405,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     final confirmed = await _confirm(
       title: '移入 Windows 回收站并退出管理？',
       message:
-          '“${resource.name}”将从 TAGTAG 删除标签和空间关系，并移入 Windows 回收站。'
-          '成功后可在操作日志中撤销；清空系统回收站后将无法恢复。',
+          '“${resource.name}”将从 TAGTAG 删除标签和空间关系，并移入 Windows 回收站；清空系统回收站后将无法恢复。',
       actionLabel: '移入回收站',
       destructive: true,
     );
@@ -422,7 +431,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       controller.selectResource(fallback.id);
     }
     final result = await showPrototypeDialog<PrototypeQuickTagResult>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => PrototypeQuickTagDialog(controller: controller),
     );
     if (result == null) {
@@ -540,7 +549,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       title: '恢复先前路径并退出管理？',
       message:
           '“${resource.name}”将移动到导入前的位置，并从 TAGTAG 删除标签和空间关系。'
-          '目标存在同名资源时不会覆盖；成功后可在操作日志中撤销。',
+          '目标存在同名资源时不会覆盖。',
       actionLabel: '恢复并退出',
     );
     if (!confirmed) {
@@ -624,7 +633,7 @@ class _TagTagHomeState extends State<TagTagHome> {
 
     setState(() => _importDialogOpen = true);
     final result = await showPrototypeDialog<PrototypeImportResult>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => PrototypeImportDialog(
         controller: controller,
         sources: sources,
@@ -668,7 +677,7 @@ class _TagTagHomeState extends State<TagTagHome> {
 
   Future<void> _showCreateTag({String? parentId}) async {
     final result = await showPrototypeDialog<_TagDraft>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => _TagDialog(
         title: parentId == null ? '新建根标签' : '新建子标签',
         tags: controller.state.tags
@@ -698,7 +707,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     final placement = controller.state.placementById(placementId);
     final tag = controller.tagForPlacement(placement);
     final result = await showPrototypeDialog<_TagDraft>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => _TagDialog(
         title: '编辑标签实体',
         initialName: tag.name,
@@ -734,7 +743,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       return;
     }
     final targetTagId = await showPrototypeDialog<String>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => _MergeTagDialog(
         controller: controller,
         sourceTag: sourceTag,
@@ -749,7 +758,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         targetTagId: targetTagId,
         sourceTagIds: {sourceTag.id},
       );
-    }, successMessage: '标签实体已合并；可在操作日志中撤销。');
+    }, successMessage: '标签实体已合并。');
   }
 
   Future<void> _showSplitTag(String placementId) async {
@@ -763,7 +772,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       return;
     }
     final draft = await showPrototypeDialog<_SplitTagDraft>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => _SplitTagDialog(
         controller: controller,
         tag: tag,
@@ -779,7 +788,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         placementIds: draft.placementIds,
         newName: draft.name,
       );
-    }, successMessage: '所选位置已拆分为独立标签实体；可在操作日志中撤销。');
+    }, successMessage: '所选位置已拆分为独立标签实体。');
   }
 
   Future<void> _deleteActiveTag() async {
@@ -1039,13 +1048,6 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
   }
 
-  Future<void> _showOperationLog() async {
-    await showPrototypeDialog<void>(
-      context: context,
-      builder: (context) => _OperationLogDialog(controller: controller),
-    );
-  }
-
   Future<void> _scanConsistency() async {
     if (_scanningConsistency) {
       return;
@@ -1063,7 +1065,7 @@ class _TagTagHomeState extends State<TagTagHome> {
 
   Future<void> _showConsistencyFindings() async {
     final findings = await showPrototypeDialog<List<ConsistencyFinding>>(
-      context: context,
+      context: _dialogContext,
       barrierDismissible: false,
       builder: (context) => _ConsistencyDialog(
         controller: controller,
@@ -1098,7 +1100,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     bool destructive = false,
   }) async {
     return await showPrototypeDialog<bool>(
-          context: context,
+          context: _dialogContext,
           builder: (context) => AlertDialog(
             title: Text(title),
             content: Text(message),
@@ -1128,7 +1130,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     required String actionLabel,
   }) async {
     return showPrototypeDialog<String>(
-      context: context,
+      context: _dialogContext,
       builder: (context) => _TextPromptDialog(
         title: title,
         label: label,
@@ -1529,283 +1531,6 @@ class _ConsistencyDialogState extends State<_ConsistencyDialog> {
     } finally {
       if (showProgress && mounted) {
         setState(() => _busy = false);
-      }
-    }
-  }
-}
-
-class _OperationLogDialog extends StatefulWidget {
-  const _OperationLogDialog({required this.controller});
-
-  final TagTagController controller;
-
-  @override
-  State<_OperationLogDialog> createState() => _OperationLogDialogState();
-}
-
-class _OperationLogDialogState extends State<_OperationLogDialog> {
-  late Future<List<ManagedOperation>> _operations;
-  String? _error;
-  String? _undoingId;
-  bool _showTagOperations = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _operations = widget.controller.listOperations();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('操作日志'),
-      content: SizedBox(
-        width: 720,
-        height: 460,
-        child: Column(
-          children: [
-            if (_error != null) ...[
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  _error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
-            Align(
-              alignment: Alignment.centerLeft,
-              child: SegmentedButton<bool>(
-                segments: const [
-                  ButtonSegment(
-                    value: false,
-                    label: Text('资源操作'),
-                    icon: Icon(Icons.folder_outlined, size: 17),
-                  ),
-                  ButtonSegment(
-                    value: true,
-                    label: Text('标签操作'),
-                    icon: Icon(Icons.account_tree_outlined, size: 17),
-                  ),
-                ],
-                selected: {_showTagOperations},
-                onSelectionChanged: (selection) {
-                  setState(() {
-                    _showTagOperations = selection.single;
-                    _error = null;
-                  });
-                },
-                showSelectedIcon: false,
-              ),
-            ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: _showTagOperations
-                  ? _buildTagOperationList()
-                  : FutureBuilder<List<ManagedOperation>>(
-                      future: _operations,
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState != ConnectionState.done) {
-                          return const Center(
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        if (snapshot.hasError) {
-                          return Center(
-                            child: Text('读取操作日志失败：${snapshot.error}'),
-                          );
-                        }
-                        final operations = snapshot.data ?? const [];
-                        if (operations.isEmpty) {
-                          return const Center(child: Text('还没有受管操作记录'));
-                        }
-                        return ListView.separated(
-                          itemCount: operations.length,
-                          separatorBuilder: (_, _) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final operation = operations[index];
-                            final undone = operation.undoneAt != null;
-                            final IconData icon;
-                            final String title;
-                            final String subtitle;
-                            switch (operation.type) {
-                              case ManagedOperationType.importCopy:
-                                icon = Icons.content_copy_outlined;
-                                title = '复制导入';
-                                subtitle =
-                                    '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
-                              case ManagedOperationType.importMove:
-                                icon = Icons.drive_file_move_outline;
-                                title = '移动导入';
-                                subtitle =
-                                    '${operation.sourcePath}\n存储根 / ${operation.destinationRelativePath}';
-                              case ManagedOperationType.exitRestore:
-                                icon = Icons.logout;
-                                title = '恢复原路径退出管理';
-                                subtitle =
-                                    '存储根 / ${operation.destinationRelativePath}\n恢复到 ${operation.sourcePath}';
-                              case ManagedOperationType.exitMove:
-                                icon = Icons.drive_file_move_outline;
-                                title = '移动到指定位置退出管理';
-                                subtitle =
-                                    '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
-                              case ManagedOperationType.exitRecycle:
-                                icon = Icons.delete_outline;
-                                title = '移入 Windows 回收站退出管理';
-                                subtitle =
-                                    '存储根 / ${operation.destinationRelativePath}\nWindows 回收站';
-                              case ManagedOperationType.takeover:
-                                icon = Icons.add_task_outlined;
-                                title = '接管未受管内容';
-                                subtitle =
-                                    '存储根 / ${operation.destinationRelativePath}';
-                              case ManagedOperationType.untrackedMoveOut:
-                                icon = Icons.drive_file_move_outline;
-                                title = '移出未受管内容';
-                                subtitle =
-                                    '存储根 / ${operation.destinationRelativePath}\n移动到 ${operation.sourcePath}';
-                              case ManagedOperationType.externalMoveAccept:
-                                icon = Icons.link_outlined;
-                                title = '接受外部移动的新路径';
-                                subtitle =
-                                    '原记录：存储根 / ${operation.destinationRelativePath}\n新路径：${operation.sourcePath}';
-                              case ManagedOperationType.externalMoveRestore:
-                                icon = Icons.settings_backup_restore;
-                                title = '恢复外部移动的记录路径';
-                                subtitle =
-                                    '从 ${operation.sourcePath}\n恢复到：存储根 / ${operation.destinationRelativePath}';
-                            }
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: Icon(icon),
-                              title: Text(title),
-                              subtitle: Text(
-                                subtitle,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              trailing: undone
-                                  ? const Text('已撤销')
-                                  : IconButton(
-                                      tooltip: '撤销此操作',
-                                      onPressed: _undoingId == null
-                                          ? () => _undo(operation.id)
-                                          : null,
-                                      icon: _undoingId == operation.id
-                                          ? const SizedBox.square(
-                                              dimension: 18,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                              ),
-                                            )
-                                          : const Icon(Icons.undo),
-                                    ),
-                            );
-                          },
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('关闭'),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildTagOperationList() {
-    final operations = widget.controller.tagOperations;
-    if (operations.isEmpty) {
-      return const Center(child: Text('还没有标签操作记录'));
-    }
-    final latestActiveId = operations
-        .where((operation) => operation.undoneAt == null)
-        .map((operation) => operation.id)
-        .firstOrNull;
-    return ListView.separated(
-      itemCount: operations.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
-      itemBuilder: (context, index) {
-        final operation = operations[index];
-        final undone = operation.undoneAt != null;
-        return ListTile(
-          contentPadding: EdgeInsets.zero,
-          leading: Icon(
-            operation.type == TagDomainOperationType.merge
-                ? Icons.merge_type
-                : Icons.call_split,
-          ),
-          title: Text(
-            operation.type == TagDomainOperationType.merge ? '合并标签' : '拆分标签',
-          ),
-          subtitle: Text(operation.summary),
-          trailing: undone
-              ? const Text('已撤销')
-              : IconButton(
-                  tooltip: operation.id == latestActiveId
-                      ? '撤销此标签操作'
-                      : '请先撤销较新的标签操作',
-                  onPressed:
-                      _undoingId == null && operation.id == latestActiveId
-                      ? () => _undoTag(operation.id)
-                      : null,
-                  icon: _undoingId == operation.id
-                      ? const SizedBox.square(
-                          dimension: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.undo),
-                ),
-        );
-      },
-    );
-  }
-
-  Future<void> _undoTag(String operationId) async {
-    setState(() {
-      _undoingId = operationId;
-      _error = null;
-    });
-    try {
-      await widget.controller.undoTagOperation(operationId);
-      if (mounted) {
-        setState(() => _undoingId = null);
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _undoingId = null;
-          _error = '撤销失败：$error';
-        });
-      }
-    }
-  }
-
-  Future<void> _undo(String operationId) async {
-    setState(() {
-      _undoingId = operationId;
-      _error = null;
-    });
-    try {
-      await widget.controller.undoOperation(operationId);
-      if (mounted) {
-        setState(() {
-          _undoingId = null;
-          _operations = widget.controller.listOperations();
-        });
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _undoingId = null;
-          _error = '撤销失败：$error';
-        });
       }
     }
   }

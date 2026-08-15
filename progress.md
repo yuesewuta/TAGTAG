@@ -538,3 +538,41 @@
 - 用户确认后两次提交推送 main：06da8ac（三项交互改动）与 9400b60（拖拽层级）。
 - 应用图标与悬浮接收目标图标统一为 TAGTAG LOGO：从 assets/branding/tagtag-logo.png 裁切透明内容、方形填充后生成多尺寸 app_icon.ico（悬浮目标 WM_PAINT 复用 IDI_APP_ICON，无需改代码）；已核验 Release EXE 内嵌图标不再是 Flutter 默认图标。
 - 版本按 SemVer 提升为 0.11.0+1，README 当前功能版本同步为 v0.11.0；最终门禁：分析 0 问题、全量测试 100/100、Windows Release 构建成功。
+
+## 会话：2026-08-14（P1-4：保存查询/常用标签管理/历史清理）
+
+- 恢复 saved-queries 工单上下文；规格与两张任务卡确认后按 TDD 先写域层行为测试（首轮红灯为缺少 SavedQuery 与控制器 API）。
+- 域层落地：SavedQuery 模型（完整搜索条件 + spaceId + createdAt）；AppState 新增 savedQueries/pinnedPlacementIds/hiddenPlacementIds，fromJson 缺省回退空值，状态 JSON version 4→5（读取路径不校验版本，沿用 tagOperations 先例）；控制器新增保存/应用/删除查询、固定/隐藏开关（拒绝跨空间位置）与按空间清空使用历史；commonPlacements 改为固定优先（按使用计数）、隐藏排除、上限 5。
+- UI 落地：搜索页新增“保存查询”入口（无条件时禁用，小型 PrototypeDialogFrame 命名弹窗）与查询 chips（点击应用、× 删除，应用时同步搜索框文本）；层级“标签操作”菜单新增固定/隐藏项（标签随状态变化）；快速标注“最近使用”改为“常用标签”并展示 commonPlacements（无使用数据时回退全部标签以保持首次可用）；状态抽屉操作日志页新增“清空历史记录”（AlertDialog 确认，不动操作日志）。
+- 测试过程修复两处实现/测试问题：PrototypeTagOption 双行文本在 51px 行高下存在 2px 垂直溢出（显式行高修复）；直接 await 控制器持久化会在 widget 测试的 fake-async 区挂起，改用 tester.runAsync 包裹。
+- 最终门禁：dart format 本次改动文件零差异（另有 5 个历史遗留未格式化文件未动）、flutter analyze 0 问题、全量测试 113/113（新增 10 域层 + 4 widget）、Windows Release 构建成功；saved-queries 三个工单与 map 均已 resolved。未做 git 提交，等待用户确认。
+
+## 会话：2026-08-14（Liquid Glass 视觉重构）
+
+- 方向切换：用户以 Apple Liquid Glass（macOS Tahoe / iOS 26）取代原有像素级原型对齐方向；只改颜色/材质/阴影/圆角/动效，不动几何结构、widget key、tooltip 与可见文案。
+- 新增 `lib/ui/glass.dart`：`GlassPanel`（背景模糊 + 半透明填充 + 1px 高光描边 + 顶部镜面高光 + 柔阴影，panel 16/card 18/dialog 20/button 12 圆角）、`GlassCanvas`（浅色 #EDF0F5 / 深色 #101216 基底 + 2-3 团大面积低透明度径向渐变光晕）、`GlassPrimaryButton`（上浅下深竖向渐变 + 顶部内高光 + 彩色投影，禁用时退化为半透明纯色）。
+- 应用面：左侧导航、32px 窗口栏、检查器（宽栏与浮层）、状态抽屉、拖放导入卡片、全部 PrototypeDialogFrame 对话框；命令栏与表头用半透明 canvas tint（不加 BackdropFilter，表格行/树节点零模糊开销）；资源行选中/悬停改半透明 primarySoft/tint；弹出菜单与 snackbar 走主题半透明 + 大圆角。
+- 动效：对话框 220ms、前 160ms 淡入 + 0.92→1.0 `Curves.easeOutBack` 回弹缩放；抽屉/检查器/导航浮层滑入改 `Curves.easeOutExpo` 280ms；`_motionDuration` 的 reduced-motion 归零管道保持不变。
+- 关键平台问题与修复：模态路由内 BackdropFilter 的填充在该 Windows Release 运行时不参与合成（实测不透明红色填充仍显示模糊暗色背景，绿屏障实验确认构建链路正常）；将 GlassPanel 改为倒序结构——纯色填充置于 BackdropFilter **之下**（被折入模糊背景，纯色经模糊不变），边框/镜面/内容置于其上——对话框玻璃随即正确合成。
+- 对话框填充不透明度调至浅色 0.86 / 深色 0.82（暗色屏障下 0.6 填充文字对比不足）；AlertDialog 经 dialogTheme 获得半透明填充 + 20 圆角；snackbar 0.92 不透明度 12 圆角。
+- 截图验证（隔离 APPDATA + 种子库 + PrintWindow，窗口 1440x900，输出于 `output/parity/`）：浅色工作区/设置/快速标注/状态抽屉、深色工作区/设置/状态抽屉，逐张目检确认模糊透光、镜面边缘、柔阴影与可读对比度。
+- 最终门禁：analyze 0 问题、全量测试 113/113、Windows Release 构建成功；已结束自行启动的验证实例，未做 git 提交。
+- 已知妥协：命令栏/表头用半透明叠加而非实时模糊（背后是静态画布，视觉无差）；snackbar 不支持主题级模糊；吐司动画沿用 SnackBar 默认。
+
+## 会话：2026-08-14（统一日志页与撤销移除）
+
+- 用户要求：取消日志中的撤销功能（避免时间线混乱），日志提升为左侧导航一等页面，覆盖资源/标签/设置/一致性全部软件相关变化，按级别配色并支持过滤筛选。
+- 领域层：新增 LogLevel（信息/提醒/警告）与 LogCategory（资源/标签/设置/一致性）、AppLogEvent 持久化于 AppState（cap 500，向后兼容）；TagDomainOperationType 扩展 create/edit/deletePlacement/deleteEntity/reparent/pin/hide 并在各动作点记录；updatePreferences 逐字段 diff 生成设置日志（无变化不记录）；scanConsistency 按签名去重记录一致性告警与恢复。
+- 控制器新增 ResourceView.log/showLog/listLogEntries（合并资源操作、标签操作、应用事件，按时间倒序，退出/删除类为提醒级）。
+- UI：左侧导航新增“日志”页（关键词 + 级别 + 类别组合筛选，级别色点与芯片）；状态抽屉历史页移除撤销按钮并改为“查看全部日志”入口；删除遗留 _OperationLogDialog 及其撤销流程；清理“可在操作日志中撤销”等过时文案。
+- 测试：重写旧撤销测试为日志页断言（含“无撤销入口”），新增统一日志领域测试 4 个与筛选 widget 测试；全量 118/118 通过，分析 0 问题，Windows Release 构建成功。
+
+## 会话：2026-08-15（测试反馈六项修复）
+
+- 悬浮接收目标去掉青绿色圆形底色：窗口改为 WS_EX_LAYERED，用 32bpp DIB + DrawIconEx + 预乘 alpha + UpdateLayeredWindow 只绘制 LOGO，实机截图核验透明背景生效。
+- 日志页：导航图标由 history 改为 receipt_long（与“最近”区分）；7 个文字筛选按钮收敛为“全部级别/全部类别”两个紧凑下拉；标签类日志行尾标注所属空间名（LogEntry.spaceName）。
+- 展开层级菜单按标签树实际深度动态生成（仅顶层/第 2 层/…/第 N 层），消除跳层；同步修正 demo 深度对应的测试。
+- 修复 tooltip 深色模式下白字浅底的空白问题（tooltip 背景固定为深色 TagTagColors.foreground）。
+- 修复深色模式下 Quick Tag 等对话框仍为浅色的问题：对话框挂在根 Navigator，捕获不到 home_screen 的 Theme 覆盖；showPrototypeDialog 现在捕获调用方主题，home_screen 通过 Builder 记录 Theme 覆盖下的 _dialogContext 作为对话框调用起点，两个原生 showDialog 调用同步包装。新增深色对话框回归测试。
+- 确认“归档”标签来自测试/使用数据（种子库创建时间 2026-08-13），TAGTAG 不创建系统默认标签，无需特殊处理。
+- 最终门禁：静态分析 0 问题，全量测试 119/119，Windows Release 构建成功。
