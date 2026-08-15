@@ -594,3 +594,11 @@
 - 唯一标签策略完成：TagNamePolicy（inherit/unique/free）+ 全局“标签名称全局唯一”偏好 + 创建重名守卫 + 策略菜单 + 树节点同名徽标；领域与 UI 测试全过。
 - 展开层级控件改为滑杆对话框（含仅顶层/全部展开）；tooltip 深色对比修复。
 - 最终门禁：静态分析 0 问题，全量测试 129/129，Windows Release 构建成功。
+
+## 会话：2026-08-16（P1-5：导入自动命名与手动批量整理）
+
+- 按 .scratch/auto-naming-organize/spec.md 已确认设计实施：全局命名模板 + 导入预览，手动批量整理（打标签时绝不自动归档）。
+- 命名：UserPreferences 新增 namingTemplate（默认空=保留原名，fromJson 缺 key 向后兼容）；TagTagController.applyNamingTemplate 静态渲染 {原名}/{日期}/{时间}/{标签}/{序号}，保留扩展名，`\/:*?"<>|` 清洗为 `-`，空标签回退“未标注”；updatePreferences 记录“命名模板 已更新/已清除”不回显内容。设置→导入与标注加模板输入框 + 占位符帮助 + 实时示例；导入对话框模板非空时显示“按模板重命名”开关（默认开）与第一来源预览行，确认结果携带 renamedSources 重命名计划；导入执行经 importManagedResource/importResource 新 targetName 参数落名，冲突仍不覆盖。
+- 整理：ManagedLibrary 新增 organizeMove（schema v6→v7，operations CHECK 加 organize_move），同事务完成复制、resources 路径更新（含文件夹嵌套受管资源前缀改写）、源删除与日志写入，失败回滚补偿；_undoOrganizeMove 按 context 恢复原路径；移动后修剪遗留空目录保证一致性扫描干净。控制器新增 previewOrganizeForPlacement（有效标签=直接+继承，计数/目标目录/冲突，已在位跳过、冲突不覆盖）与 organizeForPlacement；层级“标签操作”菜单新增“整理此标签的资源到目录…”预览对话框（PrototypeDialogFrame，取消/整理），统一日志显示“整理资源到标签目录”，领域层支持撤销（无 UI 撤销按钮）。
+- 测试新增 18 个（test/auto_naming_organize_test.dart）：模板渲染 6、偏好持久化与兼容 2、模板导入 3、整理域层 5（预览计数/冲突、字节往返+扫描干净+撤销、继承嵌套移动、v6 迁移）、widget 流程 3（设置保存模板、导入对话框开关与预览、标签菜单整理端到端）。
+- 最终门禁：analyze 0 问题、全量测试 148/148（基线 130 + 新增 18）、Windows Release 构建成功；auto-naming-organize 三个工单与 map 均已 resolved。未做 git 提交。

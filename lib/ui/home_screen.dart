@@ -248,6 +248,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       appearanceTheme: result.appearanceTheme,
       interfaceDensity: result.interfaceDensity,
       uniqueTagNames: result.uniqueTagNames,
+      namingTemplate: result.namingTemplate,
       quickTagShortcut: shortcutRegistered == false
           ? controller.preferences.quickTagShortcut
           : result.quickTagShortcut,
@@ -673,6 +674,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           targetDirectory: result.targetDirectory,
           mode: result.mode,
           placementIds: result.placementIds,
+          targetName: result.renamedSources[source.path],
         );
         importedCount += 1;
       }

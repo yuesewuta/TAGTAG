@@ -190,9 +190,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
                 onTap: canInherit
                     ? () => setState(() => _inheritChildren = !_inheritChildren)
                     : () => ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('选择一个文件夹后可启用子项继承'),
-                        ),
+                        const SnackBar(content: Text('选择一个文件夹后可启用子项继承')),
                       ),
                 child: Row(
                   children: [
@@ -264,11 +262,17 @@ class PrototypeImportResult {
     required this.mode,
     required this.targetDirectory,
     required this.placementIds,
+    required this.renamedSources,
   });
 
   final ImportMode mode;
   final String targetDirectory;
   final Set<String> placementIds;
+
+  /// Rename plan produced by the 按模板重命名 toggle: source path → planned
+  /// base name rendered from the global naming template. Empty when the
+  /// batch imports with original names.
+  final Map<String, String> renamedSources;
 }
 
 enum _ImportReselectKind { files, folder }
@@ -296,6 +300,17 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
   final Set<String> _placementIds = {};
   String _targetDirectory = '';
   String? _targetError;
+  bool _renameWithTemplate = true;
+
+  String get _namingTemplate => widget.controller.preferences.namingTemplate;
+
+  bool get _renameAvailable => _namingTemplate.trim().isNotEmpty;
+
+  List<String> get _selectedTagNames => [
+    for (final placement in widget.controller.placementsInActiveSpace)
+      if (_placementIds.contains(placement.id))
+        widget.controller.tagForPlacement(placement).name,
+  ];
 
   @override
   void initState() {
@@ -308,6 +323,37 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
   void dispose() {
     _tagQueryController.dispose();
     super.dispose();
+  }
+
+  String? get _renamePreview {
+    if (!_renameAvailable || !_renameWithTemplate || _sources.isEmpty) {
+      return null;
+    }
+    return TagTagController.applyNamingTemplate(
+      template: _namingTemplate,
+      sourceName: path.basename(_sources.first.path),
+      importDate: DateTime.now(),
+      tagNames: _selectedTagNames,
+      index: 1,
+    );
+  }
+
+  Map<String, String> _buildRenamePlan() {
+    if (!_renameAvailable || !_renameWithTemplate) {
+      return const {};
+    }
+    final now = DateTime.now();
+    final tagNames = _selectedTagNames;
+    return {
+      for (var index = 0; index < _sources.length; index++)
+        _sources[index].path: TagTagController.applyNamingTemplate(
+          template: _namingTemplate,
+          sourceName: path.basename(_sources[index].path),
+          importDate: now,
+          tagNames: tagNames,
+          index: index + 1,
+        ),
+    };
   }
 
   @override
@@ -361,6 +407,11 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
                   widget.controller.tagForPlacement(placement).name,
             ],
             onModeChanged: (mode) => setState(() => _mode = mode),
+            renameAvailable: _renameAvailable,
+            renameWithTemplate: _renameWithTemplate,
+            renamePreview: _renamePreview,
+            onRenameChanged: (value) =>
+                setState(() => _renameWithTemplate = value),
           );
           if (compact) {
             return ListView(
@@ -392,6 +443,7 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
                     mode: _mode,
                     targetDirectory: _targetDirectory,
                     placementIds: Set.unmodifiable(_placementIds),
+                    renamedSources: Map.unmodifiable(_buildRenamePlan()),
                   ),
                 ),
           icon: Icon(
@@ -756,6 +808,10 @@ class _ImportSummary extends StatelessWidget {
     required this.targetLabel,
     required this.selectedTags,
     required this.onModeChanged,
+    required this.renameAvailable,
+    required this.renameWithTemplate,
+    required this.renamePreview,
+    required this.onRenameChanged,
   });
 
   final ImportMode mode;
@@ -763,6 +819,10 @@ class _ImportSummary extends StatelessWidget {
   final String targetLabel;
   final List<String> selectedTags;
   final ValueChanged<ImportMode> onModeChanged;
+  final bool renameAvailable;
+  final bool renameWithTemplate;
+  final String? renamePreview;
+  final ValueChanged<bool> onRenameChanged;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -790,6 +850,42 @@ class _ImportSummary extends StatelessWidget {
           onSelected: onModeChanged,
           expanded: true,
         ),
+        if (renameAvailable) ...[
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '按模板重命名',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      '关闭后本批保留原文件名',
+                      style: TextStyle(fontSize: 11, color: _muted(context)),
+                    ),
+                  ],
+                ),
+              ),
+              PillSwitch(value: renameWithTemplate, onChanged: onRenameChanged),
+            ],
+          ),
+          if (renamePreview != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                '第一个资源将命名为：$renamePreview',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: _muted(context)),
+              ),
+            ),
+        ],
         const SizedBox(height: 18),
         _SummaryRow('资源', '$sourceCount 项'),
         _SummaryRow('位置', targetLabel),
@@ -871,6 +967,7 @@ class PrototypeSettingsResult {
     required this.interfaceDensity,
     required this.quickTagShortcut,
     required this.uniqueTagNames,
+    required this.namingTemplate,
   });
 
   final bool moveImportsByDefault;
@@ -881,6 +978,7 @@ class PrototypeSettingsResult {
   final String interfaceDensity;
   final String quickTagShortcut;
   final bool uniqueTagNames;
+  final String namingTemplate;
 }
 
 enum PrototypeSettingsSection { general, imports, storage, windows, appearance }
@@ -927,6 +1025,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
   late String _interfaceDensity;
   late String _quickTagShortcut;
   late bool _uniqueTagNames;
+  late final TextEditingController _namingTemplateController;
   PrototypeSettingsSection _section = PrototypeSettingsSection.general;
   final FocusNode _shortcutFocusNode = FocusNode();
   bool _recording = false;
@@ -944,11 +1043,15 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
     _interfaceDensity = preferences.interfaceDensity;
     _quickTagShortcut = preferences.quickTagShortcut;
     _uniqueTagNames = preferences.uniqueTagNames;
+    _namingTemplateController = TextEditingController(
+      text: preferences.namingTemplate,
+    );
   }
 
   @override
   void dispose() {
     _shortcutFocusNode.dispose();
+    _namingTemplateController.dispose();
     super.dispose();
   }
 
@@ -1012,6 +1115,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
                   interfaceDensity: _interfaceDensity,
                   quickTagShortcut: _quickTagShortcut,
                   uniqueTagNames: _uniqueTagNames,
+                  namingTemplate: _namingTemplateController.text.trim(),
                 ),
               ),
               icon: const Icon(Icons.check, size: 17),
@@ -1110,6 +1214,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
         onSelected: (value) => setState(() => _moveImportsByDefault = value),
       ),
     ),
+    _namingTemplateSetting(context),
     _SettingRow(
       title: '零标签资源',
       subtitle: '导入后进入当前空间待整理区',
@@ -1126,6 +1231,53 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
       ),
     ),
   ];
+
+  /// Naming template field with placeholder help and a live example that
+  /// re-renders on every keystroke.
+  Widget _namingTemplateSetting(BuildContext context) {
+    final template = _namingTemplateController.text;
+    final example = TagTagController.applyNamingTemplate(
+      template: template,
+      sourceName: '报告.pdf',
+      importDate: DateTime.now(),
+      tagNames: const ['设计', '项目'],
+      index: 1,
+    );
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: _border(context))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('导入命名模板', style: TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 2),
+          Text(
+            '留空则保留原文件名。可用占位符：{原名} {日期} {时间} {标签} {序号}',
+            style: TextStyle(fontSize: 11, color: _muted(context)),
+          ),
+          const SizedBox(height: 9),
+          SizedBox(
+            height: 34,
+            child: TextField(
+              key: const ValueKey('naming-template-field'),
+              controller: _namingTemplateController,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(hintText: '例如 {日期}-{标签}-{原名}'),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '示例：$example',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 11, color: _muted(context)),
+          ),
+        ],
+      ),
+    );
+  }
 
   List<Widget> _storageSettings(bool compact) {
     final root = widget.controller.storageRoot;

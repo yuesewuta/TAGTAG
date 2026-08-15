@@ -23,6 +23,7 @@ enum ManagedOperationType {
   untrackedMoveOut,
   externalMoveAccept,
   externalMoveRestore,
+  organizeMove,
 }
 
 enum ConsistencyFindingType { untracked, missing }
@@ -156,7 +157,7 @@ class ManagedLibrary {
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
-  static const _schemaVersion = 6;
+  static const _schemaVersion = 7;
   static const _tagStateMetadataKey = 'tag_state_json';
   static const _preferencesMetadataKey = 'preferences_json';
 
@@ -277,6 +278,7 @@ class ManagedLibrary {
     required FileSystemEntity source,
     required String targetDirectory,
     ImportMode mode = ImportMode.copy,
+    String? targetName,
   }) async {
     final sourceType = await FileSystemEntity.type(source.absolute.path);
     if (sourceType == FileSystemEntityType.notFound) {
@@ -286,11 +288,19 @@ class ManagedLibrary {
         sourceType != FileSystemEntityType.directory) {
       throw UnsupportedError('只支持导入普通文件或文件夹');
     }
+    final importName = targetName ?? path.basename(source.path);
+    if (importName.trim().isEmpty ||
+        importName == '.' ||
+        importName == '..' ||
+        path.basename(importName) != importName) {
+      throw ArgumentError.value(
+        targetName,
+        'targetName',
+        '导入名称必须是不含路径分隔符的普通名称',
+      );
+    }
     final relativeDirectory = _normalizeRelativeDirectory(targetDirectory);
-    final relativePath = path.posix.join(
-      relativeDirectory,
-      path.basename(source.path),
-    );
+    final relativePath = path.posix.join(relativeDirectory, importName);
     final destinationPath = _absolutePath(relativePath);
     if (await FileSystemEntity.type(destinationPath) !=
         FileSystemEntityType.notFound) {
@@ -305,7 +315,7 @@ class ManagedLibrary {
       final now = DateTime.now().toUtc();
       final resource = ManagedResource(
         id: newId('resource'),
-        name: path.basename(source.path),
+        name: importName,
         relativePath: relativePath,
         kind: sourceType == FileSystemEntityType.file
             ? ManagedResourceKind.file
@@ -602,6 +612,7 @@ class ManagedLibrary {
               'external_move_accept' => ManagedOperationType.externalMoveAccept,
               'external_move_restore' =>
                 ManagedOperationType.externalMoveRestore,
+              'organize_move' => ManagedOperationType.organizeMove,
               final value => throw FormatException('未知操作类型: $value'),
             },
             resourceId: row['resource_id'] as String,
@@ -1413,6 +1424,153 @@ class ManagedLibrary {
     }
   }
 
+  /// Moves a managed resource into another directory inside the storage
+  /// root, keeping its name and bytes. Managed resources nested inside a
+  /// moved folder have their recorded paths rewritten in the same
+  /// transaction, so a consistency scan stays clean. The destination must
+  /// not exist: TAGTAG never overwrites.
+  Future<ManagedOperation> organizeMove(
+    String resourceId,
+    String targetRelativeDirectory,
+  ) async {
+    final resources = await listResources();
+    final matches = resources.where((resource) => resource.id == resourceId);
+    if (matches.isEmpty) {
+      throw ArgumentError.value(resourceId, 'resourceId', '找不到受管资源');
+    }
+    final resource = matches.single;
+    if (resource.status == ManagedResourceStatus.missing) {
+      throw StateError('受管资源已缺失，无法整理移动');
+    }
+    final relativeDirectory = _normalizeRelativeDirectory(
+      targetRelativeDirectory,
+    );
+    final nextRelativePath = relativeDirectory.isEmpty
+        ? resource.name
+        : path.posix.join(relativeDirectory, resource.name);
+    if (nextRelativePath == resource.relativePath) {
+      throw StateError('资源已位于目标目录');
+    }
+    if (resource.kind == ManagedResourceKind.folder &&
+        path.posix.isWithin(resource.relativePath, nextRelativePath)) {
+      throw ArgumentError.value(
+        targetRelativeDirectory,
+        'targetRelativeDirectory',
+        '不能把文件夹整理到自身内部',
+      );
+    }
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final managedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(managedPath) != type) {
+      throw FileSystemException('受管资源已缺失，无法整理移动', managedPath);
+    }
+    if (resources.any(
+      (other) =>
+          other.id != resource.id && other.relativePath == nextRelativePath,
+    )) {
+      throw StateError('目标路径已被其他受管资源占用');
+    }
+    final destinationPath = _absolutePath(nextRelativePath);
+    if (await FileSystemEntity.type(destinationPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('目标位置已存在同名资源，TAGTAG 不会覆盖', destinationPath);
+    }
+    final nested = resources
+        .where(
+          (other) =>
+              other.id != resource.id &&
+              path.posix.isWithin(resource.relativePath, other.relativePath),
+        )
+        .toList();
+    final managedRelativePaths = {
+      for (final item in resources) item.relativePath,
+    };
+
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.organizeMove,
+      resourceId: resource.id,
+      sourcePath: managedPath,
+      destinationRelativePath: nextRelativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+      contextJson: jsonEncode({'previousRelativePath': resource.relativePath}),
+    );
+    await Directory(path.dirname(destinationPath)).create(recursive: true);
+    await _copyEntity(managedPath, destinationPath, type);
+    var transactionActive = false;
+    try {
+      final stat = await FileStat.stat(destinationPath);
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at, context_json
+          ) VALUES (?, 'organize_move', ?, ?, ?, ?, NULL, ?)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+          operation.contextJson,
+        ],
+      );
+      _database.execute(
+        '''
+          UPDATE resources
+          SET relative_path = ?, status = 'managed',
+              size_bytes = ?, modified_at = ?
+          WHERE id = ?
+        ''',
+        [
+          nextRelativePath,
+          type == FileSystemEntityType.file ? stat.size : null,
+          stat.modified.toUtc().toIso8601String(),
+          resource.id,
+        ],
+      );
+      for (final item in nested) {
+        _database
+            .execute('UPDATE resources SET relative_path = ? WHERE id = ?', [
+              nextRelativePath +
+                  item.relativePath.substring(resource.relativePath.length),
+              item.id,
+            ]);
+      }
+      await _deleteEntity(managedPath, type);
+      // Directories left empty by the move must not surface as untracked
+      // content in the next consistency scan.
+      await _pruneEmptyDirectories(
+        path.dirname(managedPath),
+        managedRelativePaths,
+      );
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(managedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(destinationPath) == type) {
+        await Directory(path.dirname(managedPath)).create(recursive: true);
+        await _copyEntity(destinationPath, managedPath, type);
+      }
+      if (await FileSystemEntity.type(destinationPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(destinationPath, type);
+      }
+      rethrow;
+    }
+  }
+
   Future<void> undo(String operationId, {RecycleBinGateway? recycleBin}) async {
     final matches = (await listOperations()).where(
       (operation) => operation.id == operationId,
@@ -1450,6 +1608,10 @@ class ManagedLibrary {
     }
     if (operation.type == ManagedOperationType.externalMoveRestore) {
       await _undoExternalMoveRestore(operation);
+      return;
+    }
+    if (operation.type == ManagedOperationType.organizeMove) {
+      await _undoOrganizeMove(operation);
       return;
     }
     if (operation.type == ManagedOperationType.importMove &&
@@ -1808,6 +1970,95 @@ class ManagedLibrary {
       if (await FileSystemEntity.type(candidatePath) !=
           FileSystemEntityType.notFound) {
         await _deleteEntity(candidatePath, expectedType);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _undoOrganizeMove(ManagedOperation operation) async {
+    final context = operation.contextJson == null
+        ? const <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(operation.contextJson!) as Map);
+    final previousRelativePath = context['previousRelativePath'] as String?;
+    if (previousRelativePath == null || previousRelativePath.isEmpty) {
+      throw const FormatException('整理移动操作缺少原路径上下文');
+    }
+    final resources = await listResources();
+    final matches = resources.where(
+      (resource) => resource.id == operation.resourceId,
+    );
+    if (matches.isEmpty) {
+      throw StateError('整理移动对应的资源记录已不存在');
+    }
+    final resource = matches.single;
+    if (resource.relativePath != operation.destinationRelativePath) {
+      throw StateError('资源记录已再次变更，无法撤销整理移动');
+    }
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final organizedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(organizedPath) != type) {
+      throw FileSystemException('整理后的资源已缺失，无法撤销', organizedPath);
+    }
+    final previousPath = _absolutePath(previousRelativePath);
+    if (await FileSystemEntity.type(previousPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原位置已存在同名资源，TAGTAG 不会覆盖', previousPath);
+    }
+    final nested = resources
+        .where(
+          (other) =>
+              other.id != resource.id &&
+              path.posix.isWithin(resource.relativePath, other.relativePath),
+        )
+        .toList();
+    final managedRelativePaths = {
+      for (final item in resources) item.relativePath,
+    };
+
+    await Directory(path.dirname(previousPath)).create(recursive: true);
+    await _copyEntity(organizedPath, previousPath, type);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute('UPDATE resources SET relative_path = ? WHERE id = ?', [
+        previousRelativePath,
+        resource.id,
+      ]);
+      for (final item in nested) {
+        _database
+            .execute('UPDATE resources SET relative_path = ? WHERE id = ?', [
+              previousRelativePath +
+                  item.relativePath.substring(resource.relativePath.length),
+              item.id,
+            ]);
+      }
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      await _deleteEntity(organizedPath, type);
+      await _pruneEmptyDirectories(
+        path.dirname(organizedPath),
+        managedRelativePaths,
+      );
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(organizedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(previousPath) == type) {
+        await Directory(path.dirname(organizedPath)).create(recursive: true);
+        await _copyEntity(previousPath, organizedPath, type);
+      }
+      if (await FileSystemEntity.type(previousPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(previousPath, type);
       }
       rethrow;
     }
@@ -2404,6 +2655,32 @@ class ManagedLibrary {
     }
   }
 
+  /// Deletes [directoryPath] and its ancestors while they are empty, never
+  /// crossing the storage root or a directory that is itself a managed
+  /// resource. Used after managed moves so leftover empty directories do
+  /// not show up as untracked content.
+  Future<void> _pruneEmptyDirectories(
+    String directoryPath,
+    Set<String> managedRelativePaths,
+  ) async {
+    var current = path.normalize(directoryPath);
+    while (path.isWithin(root.path, current)) {
+      final relative = path
+          .relative(current, from: root.path)
+          .replaceAll('\\', '/');
+      if (managedRelativePaths.contains(relative)) {
+        return;
+      }
+      final directory = Directory(current);
+      if (await directory.list(followLinks: false).isEmpty) {
+        await directory.delete();
+        current = path.dirname(current);
+      } else {
+        return;
+      }
+    }
+  }
+
   static void _configure(Database database) {
     database.execute('PRAGMA foreign_keys = ON');
     database.execute('PRAGMA journal_mode = WAL');
@@ -2437,6 +2714,8 @@ class ManagedLibrary {
           _migrateV4ToV5(database);
         case 5:
           _migrateV5ToV6(database);
+        case 6:
+          _migrateV6ToV7(database);
         case _schemaVersion:
           _createSchema(database);
         default:
@@ -2517,6 +2796,21 @@ class ManagedLibrary {
     _createSchema(database);
   }
 
+  static void _migrateV6ToV7(Database database) {
+    database.execute('ALTER TABLE operations RENAME TO operations_v6');
+    _createOperationsTable(database);
+    database.execute('''
+      INSERT INTO operations(
+        id, type, resource_id, source_path,
+        destination_relative_path, created_at, undone_at, context_json
+      )
+      SELECT id, type, resource_id, source_path,
+             destination_relative_path, created_at, undone_at, context_json
+      FROM operations_v6
+    ''');
+    database.execute('DROP TABLE operations_v6');
+  }
+
   static void _createSchema(Database database) {
     database.execute('''
       CREATE TABLE IF NOT EXISTS metadata (
@@ -2558,7 +2852,7 @@ class ManagedLibrary {
             'import_copy', 'import_move', 'exit_restore',
             'exit_move', 'exit_recycle', 'takeover',
             'untracked_move_out', 'external_move_accept',
-            'external_move_restore'
+            'external_move_restore', 'organize_move'
           )
         ),
         resource_id TEXT NOT NULL,

@@ -72,6 +72,45 @@ class TagIdentityImpact {
   final int inheritanceRuleCount;
 }
 
+/// Preview of a manual organize run for one tag placement: which resources
+/// would move into the tag-path directory, which are already there, and
+/// which are blocked by name conflicts (never overwritten).
+class OrganizePreview {
+  const OrganizePreview({
+    required this.tagName,
+    required this.targetDirectory,
+    required this.movableResources,
+    required this.alreadyInPlaceCount,
+    required this.conflicts,
+  });
+
+  final String tagName;
+
+  /// Tag-path directory relative to the storage root (posix separators),
+  /// e.g. `项目/设计`.
+  final String targetDirectory;
+  final List<TagResource> movableResources;
+  final int alreadyInPlaceCount;
+  final List<({TagResource resource, String reason})> conflicts;
+
+  bool get hasWork => movableResources.isNotEmpty;
+}
+
+/// Outcome of an executed organize run.
+class OrganizeMoveSummary {
+  const OrganizeMoveSummary({
+    required this.targetDirectory,
+    required this.movedCount,
+    required this.skippedConflictCount,
+    required this.alreadyInPlaceCount,
+  });
+
+  final String targetDirectory;
+  final int movedCount;
+  final int skippedConflictCount;
+  final int alreadyInPlaceCount;
+}
+
 class TagTagController extends ChangeNotifier {
   TagTagController({required this.store, this.library, this.recycleBin});
 
@@ -179,6 +218,7 @@ class TagTagController extends ChangeNotifier {
     String? interfaceDensity,
     String? quickTagShortcut,
     bool? uniqueTagNames,
+    String? namingTemplate,
     double? floatingTargetX,
     double? floatingTargetY,
   }) async {
@@ -192,6 +232,7 @@ class TagTagController extends ChangeNotifier {
       interfaceDensity: interfaceDensity,
       quickTagShortcut: quickTagShortcut,
       uniqueTagNames: uniqueTagNames,
+      namingTemplate: namingTemplate,
       floatingTargetX: floatingTargetX,
       floatingTargetY: floatingTargetY,
     );
@@ -251,6 +292,12 @@ class TagTagController extends ChangeNotifier {
     }
     if (before.uniqueTagNames != after.uniqueTagNames) {
       changes.add('标签名称全局唯一 ${after.uniqueTagNames ? '开启' : '关闭'}');
+    }
+    if (before.namingTemplate != after.namingTemplate) {
+      // Never echo the template itself into the log.
+      changes.add(
+        after.namingTemplate.trim().isEmpty ? '命名模板 已清除' : '命名模板 已更新',
+      );
     }
     return changes;
   }
@@ -1529,11 +1576,50 @@ class TagTagController extends ChangeNotifier {
     );
   }
 
+  /// Renders the global naming template for one imported source.
+  ///
+  /// Placeholders: {原名} (source name without extension), {日期}, {时间},
+  /// {标签} (chosen tag names joined by `、`, or 未标注 when empty) and
+  /// {序号} (1-based batch index). The original file extension is kept and
+  /// characters Windows forbids in file names (`\/:*?"<>|`) become `-`.
+  /// An empty template keeps the source name unchanged.
+  static String applyNamingTemplate({
+    required String template,
+    required String sourceName,
+    required DateTime importDate,
+    List<String> tagNames = const [],
+    int index = 1,
+  }) {
+    if (template.trim().isEmpty) {
+      return sourceName;
+    }
+    final extension = path.extension(sourceName);
+    final stem = sourceName.substring(0, sourceName.length - extension.length);
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    final replacements = <String, String>{
+      '{原名}': stem,
+      '{日期}':
+          '${importDate.year}-${twoDigits(importDate.month)}-${twoDigits(importDate.day)}',
+      '{时间}':
+          '${twoDigits(importDate.hour)}-${twoDigits(importDate.minute)}-${twoDigits(importDate.second)}',
+      '{标签}': tagNames.isEmpty ? '未标注' : tagNames.join('、'),
+      '{序号}': index.toString(),
+    };
+    var rendered = template;
+    for (final entry in replacements.entries) {
+      rendered = rendered.replaceAll(entry.key, entry.value);
+    }
+    final sanitized = rendered.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-').trim();
+    final baseName = sanitized.isEmpty ? stem : sanitized;
+    return '$baseName$extension';
+  }
+
   Future<TagResource> importManagedResource({
     required FileSystemEntity source,
     required String targetDirectory,
     ImportMode mode = ImportMode.copy,
     Set<String> placementIds = const {},
+    String? targetName,
   }) async {
     final managedLibrary = library;
     final spaceId = activeSpaceId;
@@ -1556,6 +1642,7 @@ class TagTagController extends ChangeNotifier {
       source: source,
       targetDirectory: targetDirectory,
       mode: mode,
+      targetName: targetName,
     );
     final resource = _tagResourceFromManaged(managed);
     final now = DateTime.now();
@@ -1964,6 +2051,7 @@ class TagTagController extends ChangeNotifier {
       ManagedOperationType.untrackedMoveOut => '移出未受管内容',
       ManagedOperationType.externalMoveAccept => '接受外部移动',
       ManagedOperationType.externalMoveRestore => '恢复记录路径',
+      ManagedOperationType.organizeMove => '整理资源到标签目录',
     };
     final suffix = operation.undoneAt == null ? '' : '（已撤销）';
     return '$title “$name”$suffix';
@@ -2048,6 +2136,120 @@ class TagTagController extends ChangeNotifier {
     await _syncManagedResources();
     notifyListeners();
     return operation;
+  }
+
+  /// Computes the effect of organizing every resource whose effective tags
+  /// include [placement]'s tag into the tag-path directory. Resources
+  /// already inside that directory are skipped; name conflicts are listed
+  /// and never overwritten.
+  Future<OrganizePreview> previewOrganizeForPlacement(
+    String placementId,
+  ) async {
+    final managedLibrary = library;
+    final spaceId = activeSpaceId;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    if (spaceId == null) {
+      throw StateError('请先创建标签空间');
+    }
+    final placement = _state.placementById(placementId);
+    if (placement.spaceId != spaceId) {
+      throw StateError('只能整理当前标签空间中的标签');
+    }
+    final tag = _state.tagById(placement.tagId);
+    final segments = [
+      for (final segment in _placementPathSegments(placementId))
+        _sanitizePathSegment(segment),
+    ];
+    final targetDirectory = segments.join('/');
+    final targetAbsolute = path.joinAll([
+      managedLibrary.root.path,
+      ...segments,
+    ]);
+    final movable = <TagResource>[];
+    final conflicts = <({TagResource resource, String reason})>[];
+    var alreadyInPlace = 0;
+    for (final resource in resourcesForPlacement(placement)) {
+      if (path.equals(
+        path.normalize(path.dirname(resource.path)),
+        path.normalize(targetAbsolute),
+      )) {
+        alreadyInPlace += 1;
+        continue;
+      }
+      final destination = path.join(targetAbsolute, resource.name);
+      if (await FileSystemEntity.type(resource.path) ==
+          FileSystemEntityType.notFound) {
+        conflicts.add((resource: resource, reason: '资源已缺失'));
+        continue;
+      }
+      if (resource.kind == ResourceKind.folder &&
+          path.isWithin(resource.path, destination)) {
+        conflicts.add((resource: resource, reason: '目标位于资源自身内部'));
+        continue;
+      }
+      if (await FileSystemEntity.type(destination) !=
+          FileSystemEntityType.notFound) {
+        conflicts.add((resource: resource, reason: '目标位置已存在同名资源'));
+        continue;
+      }
+      movable.add(resource);
+    }
+    return OrganizePreview(
+      tagName: tag.name,
+      targetDirectory: targetDirectory,
+      movableResources: movable,
+      alreadyInPlaceCount: alreadyInPlace,
+      conflicts: conflicts,
+    );
+  }
+
+  /// Executes the organize run: every movable resource from a fresh preview
+  /// is moved into the tag-path directory as one managed operation each
+  /// (operation log type `organizeMove`, undoable at the API level).
+  Future<OrganizeMoveSummary> organizeForPlacement(String placementId) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    final preview = await previewOrganizeForPlacement(placementId);
+    var moved = 0;
+    for (final resource in preview.movableResources) {
+      await managedLibrary.organizeMove(resource.id, preview.targetDirectory);
+      moved += 1;
+    }
+    await _syncManagedResources();
+    notifyListeners();
+    return OrganizeMoveSummary(
+      targetDirectory: preview.targetDirectory,
+      movedCount: moved,
+      skippedConflictCount: preview.conflicts.length,
+      alreadyInPlaceCount: preview.alreadyInPlaceCount,
+    );
+  }
+
+  List<String> _placementPathSegments(String placementId) {
+    final segments = <String>[];
+    final seen = <String>{};
+    String? currentId = placementId;
+    while (currentId != null && seen.add(currentId)) {
+      final matches = _state.placements.where(
+        (placement) => placement.id == currentId,
+      );
+      if (matches.isEmpty) {
+        break;
+      }
+      final placement = matches.single;
+      segments.add(_state.tagById(placement.tagId).name);
+      currentId = placement.parentId;
+    }
+    return segments.reversed.toList();
+  }
+
+  static String _sanitizePathSegment(String segment) {
+    final sanitized = segment.replaceAll(RegExp(r'[\\/:*?"<>|]'), '-').trim();
+    return sanitized.isEmpty ? '未命名' : sanitized;
   }
 
   Future<void> assignPlacementToSelection(

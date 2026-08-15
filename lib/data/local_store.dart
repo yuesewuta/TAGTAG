@@ -13,6 +13,7 @@ class UserPreferences {
     this.interfaceDensity = 'compact',
     this.quickTagShortcut = 'Ctrl+Shift+T',
     this.uniqueTagNames = false,
+    this.namingTemplate = '',
     this.floatingTargetX,
     this.floatingTargetY,
   });
@@ -24,6 +25,10 @@ class UserPreferences {
   final String appearanceTheme;
   final String interfaceDensity;
   final String quickTagShortcut;
+
+  /// Global import naming template; empty keeps the original file names.
+  /// Placeholders: {原名} {日期} {时间} {标签} {序号}.
+  final String namingTemplate;
 
   /// When true, tag names are unique within a space unless the tag is
   /// explicitly exempted (TagNamePolicy.free).
@@ -43,6 +48,7 @@ class UserPreferences {
     String? interfaceDensity,
     String? quickTagShortcut,
     bool? uniqueTagNames,
+    String? namingTemplate,
     double? floatingTargetX,
     double? floatingTargetY,
   }) => UserPreferences(
@@ -55,6 +61,7 @@ class UserPreferences {
     interfaceDensity: interfaceDensity ?? this.interfaceDensity,
     quickTagShortcut: quickTagShortcut ?? this.quickTagShortcut,
     uniqueTagNames: uniqueTagNames ?? this.uniqueTagNames,
+    namingTemplate: namingTemplate ?? this.namingTemplate,
     floatingTargetX: floatingTargetX ?? this.floatingTargetX,
     floatingTargetY: floatingTargetY ?? this.floatingTargetY,
   );
@@ -69,6 +76,7 @@ class UserPreferences {
     'interfaceDensity': interfaceDensity,
     'quickTagShortcut': quickTagShortcut,
     'uniqueTagNames': uniqueTagNames,
+    'namingTemplate': namingTemplate,
     'floatingTargetX': floatingTargetX,
     'floatingTargetY': floatingTargetY,
   };
@@ -95,6 +103,7 @@ class UserPreferences {
             !const {'compact', 'comfortable'}.contains(interfaceDensity) ||
         (quickTagShortcut != null && quickTagShortcut is! String) ||
         (json['uniqueTagNames'] != null && json['uniqueTagNames'] is! bool) ||
+        (json['namingTemplate'] != null && json['namingTemplate'] is! String) ||
         (floatingTargetX != null && floatingTargetX is! num) ||
         (floatingTargetY != null && floatingTargetY is! num)) {
       throw const FormatException('TAGTAG 设置文件无效');
@@ -108,6 +117,7 @@ class UserPreferences {
       interfaceDensity: interfaceDensity as String? ?? 'compact',
       quickTagShortcut: quickTagShortcut as String? ?? 'Ctrl+Shift+T',
       uniqueTagNames: json['uniqueTagNames'] as bool? ?? false,
+      namingTemplate: json['namingTemplate'] as String? ?? '',
       floatingTargetX: (floatingTargetX as num?)?.toDouble(),
       floatingTargetY: (floatingTargetY as num?)?.toDouble(),
     );

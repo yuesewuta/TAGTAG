@@ -2970,6 +2970,8 @@ class _TagResultPanel extends StatelessWidget {
                       unawaited(onMergeTag(item.id));
                     case _TagMenuAction.split:
                       unawaited(onSplitTag(item.id));
+                    case _TagMenuAction.organize:
+                      unawaited(_organize(context, item));
                     case _TagMenuAction.delete:
                       unawaited(onDeleteTag(item.id));
                   }
@@ -3033,6 +3035,10 @@ class _TagResultPanel extends StatelessWidget {
                   const PopupMenuItem(
                     value: _TagMenuAction.split,
                     child: Text('拆分标签'),
+                  ),
+                  const PopupMenuItem(
+                    value: _TagMenuAction.organize,
+                    child: Text('整理此标签的资源到目录…'),
                   ),
                   const PopupMenuDivider(),
                   const PopupMenuItem(
@@ -3194,6 +3200,26 @@ class _TagResultPanel extends StatelessWidget {
         SnackBar(
           content: Text(
             '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _organize(BuildContext context, TagPlacement placement) async {
+    final summary = await showOrganizePreviewDialog(
+      context,
+      controller: controller,
+      placement: placement,
+    );
+    if (summary != null && context.mounted) {
+      final skipped = summary.skippedConflictCount > 0
+          ? '，跳过 ${summary.skippedConflictCount} 个冲突'
+          : '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已整理 ${summary.movedCount} 个资源到“${summary.targetDirectory}”$skipped',
           ),
         ),
       );
@@ -3636,9 +3662,7 @@ class _DateField extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
-          value == null
-              ? hint
-              : '${value!.year}/${value!.month}/${value!.day}',
+          value == null ? hint : '${value!.year}/${value!.month}/${value!.day}',
           style: TextStyle(
             fontSize: 12,
             color: value == null ? palette.textFaint : palette.text,
@@ -4441,6 +4465,10 @@ class _HistoryEntry {
         Icons.settings_backup_restore,
         '恢复记录路径',
       ),
+      ManagedOperationType.organizeMove => (
+        Icons.drive_file_move_outline,
+        '整理资源到标签目录',
+      ),
     };
     return _HistoryEntry(
       id: operation.id,
@@ -4641,6 +4669,7 @@ enum _TagMenuAction {
   policyInherit,
   merge,
   split,
+  organize,
   delete,
 }
 
@@ -4938,6 +4967,208 @@ class _ReparentTagDialogState extends State<_ReparentTagDialog> {
         setState(() => _error = '$error');
       }
     }
+  }
+}
+
+/// Shows the manual-organize preview: affected counts, target directory,
+/// and conflicts; confirming runs the moves and returns the summary.
+Future<OrganizeMoveSummary?> showOrganizePreviewDialog(
+  BuildContext context, {
+  required TagTagController controller,
+  required TagPlacement placement,
+}) {
+  return showPrototypeDialog<OrganizeMoveSummary>(
+    context: context,
+    builder: (context) =>
+        _OrganizePreviewDialog(controller: controller, placement: placement),
+  );
+}
+
+class _OrganizePreviewDialog extends StatefulWidget {
+  const _OrganizePreviewDialog({
+    required this.controller,
+    required this.placement,
+  });
+
+  final TagTagController controller;
+  final TagPlacement placement;
+
+  @override
+  State<_OrganizePreviewDialog> createState() => _OrganizePreviewDialogState();
+}
+
+class _OrganizePreviewDialogState extends State<_OrganizePreviewDialog> {
+  OrganizePreview? _preview;
+  Object? _previewError;
+  bool _executing = false;
+  String? _executeError;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final preview = await widget.controller.previewOrganizeForPlacement(
+        widget.placement.id,
+      );
+      if (mounted) setState(() => _preview = preview);
+    } catch (error) {
+      if (mounted) setState(() => _previewError = error);
+    }
+  }
+
+  Future<void> _execute() async {
+    setState(() {
+      _executing = true;
+      _executeError = null;
+    });
+    try {
+      final summary = await widget.controller.organizeForPlacement(
+        widget.placement.id,
+      );
+      if (mounted) Navigator.pop(context, summary);
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _executing = false;
+          _executeError = '$error';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _palette(context);
+    final tag = widget.controller.tagForPlacement(widget.placement);
+    return PrototypeDialogFrame(
+      width: 520,
+      desktopHeight: null,
+      icon: Icons.drive_file_move_outline,
+      title: '整理此标签的资源到目录',
+      subtitle: '按标签层级归档“${tag.name}”的资源，文件内容保持不变',
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+        child: _buildBody(context, palette),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _executing ? null : () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        GlassPrimaryButton(
+          onPressed: !_executing && _preview?.hasWork == true ? _execute : null,
+          child: Text(_executing ? '整理中…' : '整理'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBody(BuildContext context, _Palette palette) {
+    final previewError = _previewError;
+    if (previewError != null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Text(
+          '预览失败：$previewError',
+          style: TextStyle(color: palette.textMuted),
+        ),
+      );
+    }
+    final preview = _preview;
+    if (preview == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 28),
+        child: Center(
+          child: SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final rootPath = widget.controller.storageRoot?.path ?? '';
+    final targetAbsolute = preview.targetDirectory.isEmpty
+        ? rootPath
+        : path.joinAll([rootPath, ...preview.targetDirectory.split('/')]);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.folder_outlined, size: 18, color: palette.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    preview.targetDirectory.replaceAll('/', ' / '),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    targetAbsolute,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11, color: palette.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '将移动 ${preview.movableResources.length} 个资源'
+          '${preview.alreadyInPlaceCount > 0 ? '；${preview.alreadyInPlaceCount} 个已在目标目录' : ''}'
+          '${preview.conflicts.isNotEmpty ? '；${preview.conflicts.length} 个冲突将被跳过（不会覆盖）' : ''}',
+          style: TextStyle(fontSize: 12, color: palette.textMuted),
+        ),
+        if (preview.movableResources.isEmpty && preview.conflicts.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text('没有需要整理的资源', style: TextStyle(color: palette.text)),
+          ),
+        if (preview.conflicts.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 132),
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final conflict in preview.conflicts)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Text(
+                      '${conflict.resource.name} — ${conflict.reason}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 11, color: palette.textMuted),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+        if (_executeError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              _executeError!,
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.error,
+              ),
+            ),
+          ),
+        const SizedBox(height: 10),
+      ],
+    );
   }
 }
 
