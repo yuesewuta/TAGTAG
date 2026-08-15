@@ -602,3 +602,11 @@
 - 整理：ManagedLibrary 新增 organizeMove（schema v6→v7，operations CHECK 加 organize_move），同事务完成复制、resources 路径更新（含文件夹嵌套受管资源前缀改写）、源删除与日志写入，失败回滚补偿；_undoOrganizeMove 按 context 恢复原路径；移动后修剪遗留空目录保证一致性扫描干净。控制器新增 previewOrganizeForPlacement（有效标签=直接+继承，计数/目标目录/冲突，已在位跳过、冲突不覆盖）与 organizeForPlacement；层级“标签操作”菜单新增“整理此标签的资源到目录…”预览对话框（PrototypeDialogFrame，取消/整理），统一日志显示“整理资源到标签目录”，领域层支持撤销（无 UI 撤销按钮）。
 - 测试新增 18 个（test/auto_naming_organize_test.dart）：模板渲染 6、偏好持久化与兼容 2、模板导入 3、整理域层 5（预览计数/冲突、字节往返+扫描干净+撤销、继承嵌套移动、v6 迁移）、widget 流程 3（设置保存模板、导入对话框开关与预览、标签菜单整理端到端）。
 - 最终门禁：analyze 0 问题、全量测试 148/148（基线 130 + 新增 18）、Windows Release 构建成功；auto-naming-organize 三个工单与 map 均已 resolved。未做 git 提交。
+
+## 会话：2026-08-16（v0.12.0 / 高级搜索回补 / P1-5 / 1.0 稳定化）
+
+- 按用户确认的顺序执行：发布 v0.12.0（便携 ZIP + 安装器，流水线成功）→ 高级搜索 UI 回补 → P1-5 → 稳定化定 1.0。
+- 高级搜索 UI 回补：搜索页新增「高级筛选」对话框（大小 MB 范围、创建/修改时间范围），接入既有 setSearchSizeRange/setSearchCreatedRange/setSearchModifiedRange；新增 widget 测试，全量 130/130。
+- P1-5（设计经用户确认：命名+归档全做、全局模板+导入预览、手动批量整理）：命名模板（{原名}/{日期}/{时间}/{标签}/{序号}，保留扩展名，非法字符转 -）进入设置与导入对话框（开关+预览）；标签操作新增「整理此标签的资源到目录」，预览计数/冲突后执行受管移动（schema v7，organize_move 操作，同事务路径更新 + 空目录清理 + 领域层撤销）；新增 18 个测试，全量 148/148。
+- 稳定化：插件打包冒烟 GREEN，真实窗口截图核验正常；README 功能清单同步；版本策略更新为自 v1.0.0 起视为明确稳定。
+- 发布 v1.0.0 时发现 release_packaging_test 仍断言 pre-1.0 基线；修正测试后在正式 Release 产出前删除并重建标签（无公开发布被重写）。
