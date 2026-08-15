@@ -293,7 +293,7 @@ class _PillSwitchState extends State<PillSwitch> {
         : scheme.onSurface.withValues(alpha: 0.22);
     if (enabled && (_hovered || _focused)) {
       trackColor = Color.alphaBlend(
-        scheme.primary.withValues(alpha: widget.value ? 0.06 : 0.10),
+        scheme.primary.withValues(alpha: widget.value ? 0.08 : 0.16),
         trackColor,
       );
     }
@@ -332,6 +332,15 @@ class _PillSwitchState extends State<PillSwitch> {
                     : Colors.transparent,
                 width: 2,
               ),
+              boxShadow: _focused && enabled
+                  ? [
+                      BoxShadow(
+                        color: scheme.primary.withValues(alpha: 0.45),
+                        blurRadius: 8,
+                        spreadRadius: 1,
+                      ),
+                    ]
+                  : null,
             ),
             child: AnimatedAlign(
               duration: duration,

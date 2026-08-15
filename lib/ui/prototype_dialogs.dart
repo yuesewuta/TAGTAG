@@ -186,42 +186,51 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
               decoration: BoxDecoration(
                 border: Border(top: BorderSide(color: _border(context))),
               ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.account_tree_outlined,
-                    size: 18,
-                    color: _muted(context),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          '子项继承',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+              child: InkWell(
+                onTap: canInherit
+                    ? () => setState(() => _inheritChildren = !_inheritChildren)
+                    : () => ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('选择一个文件夹后可启用子项继承'),
                         ),
-                        Text(
-                          canInherit
-                              ? '应用到文件夹中的当前和未来子项'
-                              : '选择一个文件夹后可应用到当前和未来子项',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: _muted(context),
-                          ),
-                        ),
-                      ],
+                      ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.account_tree_outlined,
+                      size: 18,
+                      color: _muted(context),
                     ),
-                  ),
-                  PillSwitch(
-                    value: canInherit && _inheritChildren,
-                    onChanged: canInherit
-                        ? (value) => setState(() => _inheritChildren = value)
-                        : null,
-                  ),
-                ],
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '子项继承',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            canInherit
+                                ? '应用到文件夹中的当前和未来子项'
+                                : '选择一个文件夹后可应用到当前和未来子项',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _muted(context),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    PillSwitch(
+                      value: canInherit && _inheritChildren,
+                      onChanged: canInherit
+                          ? (value) => setState(() => _inheritChildren = value)
+                          : null,
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
