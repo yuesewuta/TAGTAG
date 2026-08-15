@@ -7,6 +7,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -27,6 +28,9 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
+  // Docked edge of the floating drop target after an edge snap.
+  enum class FloatingTargetSnap { kNone, kLeft, kRight };
+
   // The project to run.
   flutter::DartProject project_;
 
@@ -44,7 +48,16 @@ class FlutterWindow : public Win32Window {
   bool CreateFloatingDropTarget();
   void DestroyFloatingDropTarget();
   void ShowFloatingDropTarget();
-  void UpdateFloatingDropTargetPixels();
+  void UpdateFloatingDropTargetPixels(int glow_alpha = 0);
+  void ApplyFloatingDropTargetPosition();
+  void BeginFloatingDropTargetSnap();
+  void BeginFloatingDropTargetSlide(POINT target, bool finalize_snap,
+                                    FloatingTargetSnap snap);
+  void CompleteFloatingDropTargetSlide();
+  void UpdateFloatingDropTargetExpansion();
+  void SetFloatingDropTargetGlow(bool active);
+  void InstallFloatingDropTargetHook();
+  void UninstallFloatingDropTargetHook();
   static LRESULT CALLBACK FloatingDropTargetWndProc(HWND window,
                                                      UINT message,
                                                      WPARAM wparam,
@@ -72,6 +85,26 @@ class FlutterWindow : public Win32Window {
   bool floating_drop_target_enabled_ = false;
   HWND floating_drop_target_window_ = nullptr;
   bool floating_drop_target_class_registered_ = false;
+  // Persisted logical center (fully visible) restored via setPosition.
+  std::optional<POINT> floating_drop_target_position_;
+  bool floating_drop_target_captured_ = false;
+  bool floating_drop_target_dragging_ = false;
+  POINT floating_drop_target_press_point_{};
+  POINT floating_drop_target_grab_offset_{};
+  FloatingTargetSnap floating_drop_target_snap_ = FloatingTargetSnap::kNone;
+  bool floating_drop_target_hover_ = false;
+  bool floating_drop_target_tracking_leave_ = false;
+  bool floating_drop_target_expanded_ = false;
+  bool floating_drop_target_glow_ = false;
+  DWORD floating_drop_target_glow_start_ = 0;
+  bool floating_drop_target_sliding_ = false;
+  POINT floating_drop_target_slide_start_{};
+  POINT floating_drop_target_slide_target_{};
+  DWORD floating_drop_target_slide_start_tick_ = 0;
+  bool floating_drop_target_slide_finalize_ = false;
+  FloatingTargetSnap floating_drop_target_slide_snap_ =
+      FloatingTargetSnap::kNone;
+  HHOOK floating_drop_target_hook_ = nullptr;
   bool close_to_tray_ = true;
 };
 

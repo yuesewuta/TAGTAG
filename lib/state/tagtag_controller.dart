@@ -178,6 +178,9 @@ class TagTagController extends ChangeNotifier {
     String? appearanceTheme,
     String? interfaceDensity,
     String? quickTagShortcut,
+    bool? uniqueTagNames,
+    double? floatingTargetX,
+    double? floatingTargetY,
   }) async {
     final previous = _preferences;
     _preferences = _preferences.copyWith(
@@ -188,6 +191,9 @@ class TagTagController extends ChangeNotifier {
       appearanceTheme: appearanceTheme,
       interfaceDensity: interfaceDensity,
       quickTagShortcut: quickTagShortcut,
+      uniqueTagNames: uniqueTagNames,
+      floatingTargetX: floatingTargetX,
+      floatingTargetY: floatingTargetY,
     );
     final changes = _describePreferenceChanges(previous, _preferences);
     if (changes.isNotEmpty) {
@@ -209,6 +215,8 @@ class TagTagController extends ChangeNotifier {
     UserPreferences after,
   ) {
     final changes = <String>[];
+    // floatingTargetX/Y are floating-ball drag-position writes and must not
+    // spam the settings log, so they are intentionally not described here.
     if (before.moveImportsByDefault != after.moveImportsByDefault) {
       String mode(bool value) => value ? '移动' : '复制';
       changes.add(
@@ -240,6 +248,9 @@ class TagTagController extends ChangeNotifier {
       changes.add(
         'Quick Tag 快捷键 ${before.quickTagShortcut} → ${after.quickTagShortcut}',
       );
+    }
+    if (before.uniqueTagNames != after.uniqueTagNames) {
+      changes.add('标签名称全局唯一 ${after.uniqueTagNames ? '开启' : '关闭'}');
     }
     return changes;
   }
@@ -786,6 +797,60 @@ class TagTagController extends ChangeNotifier {
     );
   }
 
+  bool _isEffectivelyUnique(TagDefinition tag) =>
+      tag.namePolicy == TagNamePolicy.unique ||
+      (tag.namePolicy == TagNamePolicy.inherit && _preferences.uniqueTagNames);
+
+  TagNamePolicy tagNamePolicyOf(String tagId) =>
+      _state.tagById(tagId).namePolicy;
+
+  Future<void> setTagNamePolicy(String tagId, TagNamePolicy policy) async {
+    final spaceId = activeSpaceId;
+    final tag = _state.tagById(tagId);
+    if (spaceId == null || tag.spaceId != spaceId) {
+      throw StateError('只能修改当前标签空间中的标签');
+    }
+    if (tag.namePolicy == policy) {
+      return;
+    }
+    final summary = switch (policy) {
+      TagNamePolicy.unique => '标记标签“${tag.name}”为唯一标签',
+      TagNamePolicy.free => '允许标签“${tag.name}”同名（全局唯一例外）',
+      TagNamePolicy.inherit => '标签“${tag.name}”恢复默认同名策略',
+    };
+    await _update(
+      _withTagOperation(
+        _state.copyWith(
+          tags: _state.tags
+              .map(
+                (item) =>
+                    item.id == tagId ? item.copyWith(namePolicy: policy) : item,
+              )
+              .toList(),
+        ),
+        TagDomainOperationType.edit,
+        summary,
+      ),
+    );
+  }
+
+  /// Names shared by multiple independent tag entities in the active space.
+  Set<String> get duplicateTagNamesInActiveSpace {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return const {};
+    }
+    final counts = <String, int>{};
+    for (final tag in _state.tags) {
+      if (tag.spaceId != spaceId) continue;
+      counts.update(tag.name, (count) => count + 1, ifAbsent: () => 1);
+    }
+    return {
+      for (final entry in counts.entries)
+        if (entry.value > 1) entry.key,
+    };
+  }
+
   void _requireActiveSpacePlacement(String placementId) {
     final spaceId = activeSpaceId;
     final placement = _state.placements
@@ -867,6 +932,14 @@ class TagTagController extends ChangeNotifier {
     }
     if (reuseTagId == null && cleanName.isEmpty) {
       throw ArgumentError('标签名称不能为空');
+    }
+    if (reuseTagId == null) {
+      final duplicates = _state.tags.where(
+        (item) => item.spaceId == spaceId && item.name == cleanName,
+      );
+      if (duplicates.any(_isEffectivelyUnique)) {
+        throw StateError('已存在同名唯一标签“$cleanName”，如需共享资源请开启“复用已有标签实体”');
+      }
     }
     if (parentId != null && reuseTagId != null) {
       final ancestors = _state.ancestorTagIds(parentId);

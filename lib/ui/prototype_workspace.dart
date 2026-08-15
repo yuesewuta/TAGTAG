@@ -2488,6 +2488,37 @@ class _TagTreePanelState extends State<_TagTreePanel> {
     );
   }
 
+  Future<void> _showExpandLevelDialog() async {
+    final maxLevels = _maxTreeLevels();
+    final level = await showPrototypeDialog<int>(
+      context: context,
+      builder: (context) => _ExpandLevelDialog(
+        maxLevels: maxLevels,
+        initialLevel: _currentLevels().clamp(1, maxLevels),
+      ),
+    );
+    if (level != null) {
+      _expandToLevels(level);
+    }
+  }
+
+  int _currentLevels() {
+    final controller = widget.controller;
+    var deepest = -1;
+    void walk(TagPlacement placement, int depth) {
+      if (!_expandedIds.contains(placement.id)) return;
+      if (depth > deepest) deepest = depth;
+      for (final child in controller.childrenOf(placement.id)) {
+        walk(child, depth + 1);
+      }
+    }
+
+    for (final root in controller.rootPlacements) {
+      walk(root, 0);
+    }
+    return deepest + 2;
+  }
+
   int _maxTreeLevels() {
     final controller = widget.controller;
     var maxDepth = 0;
@@ -2524,6 +2555,7 @@ class _TagTreePanelState extends State<_TagTreePanel> {
     final palette = _palette(context);
     // The selected placement must stay visible even after a global collapse.
     final expanded = {..._expandedIds, ..._ancestorsOf(widget.selected)};
+    final duplicateNames = controller.duplicateTagNamesInActiveSpace;
     return Container(
       decoration: BoxDecoration(
         border: Border(right: BorderSide(color: palette.border)),
@@ -2560,21 +2592,10 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                     ],
                   ),
                 ),
-                PopupMenuButton<int>(
+                _SmallIconButton(
+                  icon: Icons.unfold_more,
                   tooltip: '展开层级',
-                  icon: const Icon(Icons.unfold_more, size: 18),
-                  onSelected: _expandToLevels,
-                  itemBuilder: (context) {
-                    final maxLevels = _maxTreeLevels();
-                    return [
-                      const PopupMenuItem(value: 1, child: Text('仅显示顶层')),
-                      for (var level = 2; level <= maxLevels; level++)
-                        PopupMenuItem(
-                          value: level,
-                          child: Text('展开到第 $level 层'),
-                        ),
-                    ];
-                  },
+                  onPressed: () => unawaited(_showExpandLevelDialog()),
                 ),
               ],
             ),
@@ -2590,6 +2611,7 @@ class _TagTreePanelState extends State<_TagTreePanel> {
                     depth: 0,
                     expandedIds: expanded,
                     maxIndentDepth: _maxIndentDepth,
+                    duplicateNames: duplicateNames,
                     onToggle: (id) => setState(() {
                       if (!_expandedIds.remove(id)) {
                         _expandedIds.add(id);
@@ -2651,6 +2673,7 @@ class _TagTreeNode extends StatelessWidget {
     required this.depth,
     required this.expandedIds,
     required this.maxIndentDepth,
+    required this.duplicateNames,
     required this.onToggle,
     required this.onDrop,
     required this.onDragStateChange,
@@ -2660,6 +2683,7 @@ class _TagTreeNode extends StatelessWidget {
   final int depth;
   final Set<String> expandedIds;
   final int maxIndentDepth;
+  final Set<String> duplicateNames;
   final ValueChanged<String> onToggle;
   final void Function(TagPlacement dragged, TagPlacement target) onDrop;
   final ValueChanged<String?> onDragStateChange;
@@ -2720,6 +2744,25 @@ class _TagTreeNode extends StatelessWidget {
                 ),
               ),
             ),
+            if (duplicateNames.contains(tag.name))
+              Tooltip(
+                message: '存在同名独立标签',
+                child: Container(
+                  margin: const EdgeInsets.only(right: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: palette.border),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                  child: Text(
+                    '同名',
+                    style: TextStyle(fontSize: 9, color: palette.textFaint),
+                  ),
+                ),
+              ),
             Text(
               '${controller.resourcesForPlacement(placement).length}',
               style: TextStyle(fontSize: 11, color: palette.textFaint),
@@ -2809,6 +2852,7 @@ class _TagTreeNode extends StatelessWidget {
               depth: depth + 1,
               expandedIds: expandedIds,
               maxIndentDepth: maxIndentDepth,
+              duplicateNames: duplicateNames,
               onToggle: onToggle,
               onDrop: onDrop,
               onDragStateChange: onDragStateChange,
@@ -2914,6 +2958,12 @@ class _TagResultPanel extends StatelessWidget {
                       unawaited(_togglePin(context, item));
                     case _TagMenuAction.toggleHide:
                       unawaited(_toggleHide(context, item));
+                    case _TagMenuAction.policyUnique:
+                      unawaited(_setPolicy(context, tag, TagNamePolicy.unique));
+                    case _TagMenuAction.policyFree:
+                      unawaited(_setPolicy(context, tag, TagNamePolicy.free));
+                    case _TagMenuAction.policyInherit:
+                      unawaited(_setPolicy(context, tag, TagNamePolicy.inherit));
                     case _TagMenuAction.merge:
                       unawaited(onMergeTag(item.id));
                     case _TagMenuAction.split:
@@ -2951,6 +3001,27 @@ class _TagResultPanel extends StatelessWidget {
                       controller.isPlacementHidden(item.id) ? '取消隐藏' : '从常用隐藏',
                     ),
                   ),
+                  if (controller.tagNamePolicyOf(tag.id) == TagNamePolicy.unique)
+                    const PopupMenuItem(
+                      value: _TagMenuAction.policyInherit,
+                      child: Text('取消唯一标记'),
+                    )
+                  else if (controller.tagNamePolicyOf(tag.id) == TagNamePolicy.free)
+                    const PopupMenuItem(
+                      value: _TagMenuAction.policyInherit,
+                      child: Text('移除同名例外'),
+                    )
+                  else ...[
+                    const PopupMenuItem(
+                      value: _TagMenuAction.policyUnique,
+                      child: Text('设为唯一标签'),
+                    ),
+                    if (controller.preferences.uniqueTagNames)
+                      const PopupMenuItem(
+                        value: _TagMenuAction.policyFree,
+                        child: Text('允许同名（例外）'),
+                      ),
+                  ],
                   const PopupMenuItem(
                     value: _TagMenuAction.merge,
                     child: Text('合并标签'),
@@ -3084,6 +3155,27 @@ class _TagResultPanel extends StatelessWidget {
           ),
         ),
       );
+    }
+  }
+
+  Future<void> _setPolicy(
+    BuildContext context,
+    TagDefinition tag,
+    TagNamePolicy policy,
+  ) async {
+    try {
+      await controller.setTagNamePolicy(tag.id, policy);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已更新“${tag.name}”的同名策略')),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('更新同名策略失败：$error')));
+      }
     }
   }
 
@@ -4230,6 +4322,9 @@ enum _TagMenuAction {
   reparent,
   togglePin,
   toggleHide,
+  policyUnique,
+  policyFree,
+  policyInherit,
   merge,
   split,
   delete,
@@ -4858,4 +4953,107 @@ class _LogFilterMenu<T> extends StatelessWidget {
 String _formatLogTime(DateTime value) {
   String two(int unit) => unit.toString().padLeft(2, '0');
   return '${value.month}月${value.day}日 ${two(value.hour)}:${two(value.minute)}';
+}
+
+class _ExpandLevelDialog extends StatefulWidget {
+  const _ExpandLevelDialog({
+    required this.maxLevels,
+    required this.initialLevel,
+  });
+
+  final int maxLevels;
+  final int initialLevel;
+
+  @override
+  State<_ExpandLevelDialog> createState() => _ExpandLevelDialogState();
+}
+
+class _ExpandLevelDialogState extends State<_ExpandLevelDialog> {
+  late int _level = widget.initialLevel;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxLevels = widget.maxLevels;
+    return PrototypeDialogFrame(
+      width: 420,
+      desktopHeight: null,
+      icon: Icons.unfold_more,
+      title: '展开层级',
+      subtitle: '设置标签树展开的深度',
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _level <= 1
+                  ? '仅显示顶层'
+                  : _level >= maxLevels
+                  ? '展开到第 $_level 层（全部）'
+                  : '展开到第 $_level 层（共 $maxLevels 层）',
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  '顶层',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                Expanded(
+                  child: Slider(
+                    value: _level.toDouble(),
+                    min: 1,
+                    max: maxLevels.toDouble(),
+                    divisions: maxLevels > 1 ? maxLevels - 1 : null,
+                    onChanged: maxLevels > 1
+                        ? (value) => setState(() => _level = value.round())
+                        : null,
+                  ),
+                ),
+                Text(
+                  '第 $maxLevels 层',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _level == 1
+                      ? null
+                      : () => setState(() => _level = 1),
+                  child: const Text('仅显示顶层'),
+                ),
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: _level == maxLevels
+                      ? null
+                      : () => setState(() => _level = maxLevels),
+                  child: const Text('全部展开'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, _level),
+          child: const Text('应用'),
+        ),
+      ],
+    );
+  }
 }

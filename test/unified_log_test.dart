@@ -25,6 +25,29 @@ void main() {
     expect(events[1].summary, contains('外观 深色'));
   });
 
+  test('floating target position writes do not log settings entries', () async {
+    final fixture = await _createStateFixture();
+    addTearDown(fixture.dispose);
+    final controller = fixture.controller;
+    expect(controller.state.logEvents, isEmpty);
+
+    await controller.updatePreferences(
+      floatingTargetX: 32,
+      floatingTargetY: 400,
+    );
+    expect(controller.preferences.floatingTargetX, 32.0);
+    expect(controller.preferences.floatingTargetY, 400.0);
+    expect(controller.state.logEvents, isEmpty);
+
+    // A real settings change right after still logs exactly one entry.
+    await controller.updatePreferences(closeToTray: false);
+    expect(controller.state.logEvents, hasLength(1));
+    expect(
+      controller.state.logEvents.single.summary,
+      contains('关闭主窗口时 退出'),
+    );
+  });
+
   test('tag lifecycle actions are recorded as tag log operations', () async {
     final fixture = await _createStateFixture();
     addTearDown(fixture.dispose);

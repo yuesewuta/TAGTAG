@@ -119,17 +119,22 @@ void main() {
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
 
-    // The expansion control collapses and re-expands the tree.
+    // The expansion dialog collapses and re-expands the tree.
     expect(find.text('阅读'), findsOneWidget);
     await tester.tap(find.byTooltip('展开层级'));
     await tester.pumpAndSettle();
+    expect(find.text('设置标签树展开的深度'), findsOneWidget);
     await tester.tap(find.text('仅显示顶层'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
     expect(find.text('阅读'), findsNothing);
     expect(find.text('个人'), findsOneWidget);
     await tester.tap(find.byTooltip('展开层级'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('展开到第 3 层'));
+    await tester.tap(find.text('全部展开'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
     expect(find.text('阅读'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -296,6 +301,59 @@ void main() {
     final tooltipTheme = Theme.of(tester.element(dialog)).tooltipTheme;
     final decoration = tooltipTheme.decoration as BoxDecoration;
     expect(decoration.color, TagTagColors.foreground);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('tag menu exposes the uniqueness policy and duplicate badge', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() async {
+      // Windows may keep the just-persisted JSON briefly locked; leave the
+      // system temp directory for OS cleanup instead of failing the test.
+      try {
+        await fixture.sandbox.delete(recursive: true);
+      } on PathAccessException {
+        // Ignored.
+      }
+    });
+    fixture.controller.showTagHierarchy();
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    // Expand everything so the duplicated 参考 tags become visible.
+    await tester.tap(find.byTooltip('展开层级'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('全部展开'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(find.text('同名'), findsWidgets);
+
+    await tester.tap(find.text('设计'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('标签操作'));
+    await tester.pumpAndSettle();
+    expect(find.text('设为唯一标签'), findsOneWidget);
+    await tester.tap(find.text('设为唯一标签'));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      fixture.controller.tagNamePolicyOf('tag-design'),
+      TagNamePolicy.unique,
+    );
+
+    await tester.tap(find.byTooltip('标签操作'));
+    await tester.pumpAndSettle();
+    expect(find.text('取消唯一标记'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());

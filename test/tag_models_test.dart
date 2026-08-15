@@ -29,6 +29,38 @@ void main() {
     expect(loaded.floatingDropTargetEnabled, isTrue);
   });
 
+  test('user preferences round-trip the floating target position', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'tagtag-preferences-position-',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final store = LocalStore(baseDirectory: directory);
+
+    await store.savePreferences(
+      const UserPreferences(floatingTargetX: 32, floatingTargetY: 640),
+    );
+
+    final loaded = await LocalStore(baseDirectory: directory).loadPreferences();
+    expect(loaded.floatingTargetX, 32.0);
+    expect(loaded.floatingTargetY, 640.0);
+
+    // Legacy settings without the keys parse tolerantly as "no position".
+    final legacy = UserPreferences.fromJson(const {
+      'version': 1,
+      'moveImportsByDefault': false,
+    });
+    expect(legacy.floatingTargetX, isNull);
+    expect(legacy.floatingTargetY, isNull);
+    expect(
+      () => UserPreferences.fromJson(const {
+        'version': 1,
+        'moveImportsByDefault': false,
+        'floatingTargetX': 'left',
+      }),
+      throwsFormatException,
+    );
+  });
+
   test('tag-domain metadata documents survive a library reopen', () async {
     final sandbox = await Directory.systemTemp.createTemp(
       'tagtag-domain-metadata-',

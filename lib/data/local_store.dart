@@ -12,6 +12,9 @@ class UserPreferences {
     this.appearanceTheme = 'light',
     this.interfaceDensity = 'compact',
     this.quickTagShortcut = 'Ctrl+Shift+T',
+    this.uniqueTagNames = false,
+    this.floatingTargetX,
+    this.floatingTargetY,
   });
 
   final bool moveImportsByDefault;
@@ -22,6 +25,15 @@ class UserPreferences {
   final String interfaceDensity;
   final String quickTagShortcut;
 
+  /// When true, tag names are unique within a space unless the tag is
+  /// explicitly exempted (TagNamePolicy.free).
+  final bool uniqueTagNames;
+
+  /// Last persisted floating drop target center (fully visible), in screen
+  /// coordinates. Null until the ball is first dragged.
+  final double? floatingTargetX;
+  final double? floatingTargetY;
+
   UserPreferences copyWith({
     bool? moveImportsByDefault,
     bool? floatingDropTargetEnabled,
@@ -30,6 +42,9 @@ class UserPreferences {
     String? appearanceTheme,
     String? interfaceDensity,
     String? quickTagShortcut,
+    bool? uniqueTagNames,
+    double? floatingTargetX,
+    double? floatingTargetY,
   }) => UserPreferences(
     moveImportsByDefault: moveImportsByDefault ?? this.moveImportsByDefault,
     floatingDropTargetEnabled:
@@ -39,6 +54,9 @@ class UserPreferences {
     appearanceTheme: appearanceTheme ?? this.appearanceTheme,
     interfaceDensity: interfaceDensity ?? this.interfaceDensity,
     quickTagShortcut: quickTagShortcut ?? this.quickTagShortcut,
+    uniqueTagNames: uniqueTagNames ?? this.uniqueTagNames,
+    floatingTargetX: floatingTargetX ?? this.floatingTargetX,
+    floatingTargetY: floatingTargetY ?? this.floatingTargetY,
   );
 
   Map<String, dynamic> toJson() => {
@@ -50,6 +68,9 @@ class UserPreferences {
     'appearanceTheme': appearanceTheme,
     'interfaceDensity': interfaceDensity,
     'quickTagShortcut': quickTagShortcut,
+    'uniqueTagNames': uniqueTagNames,
+    'floatingTargetX': floatingTargetX,
+    'floatingTargetY': floatingTargetY,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
@@ -59,6 +80,8 @@ class UserPreferences {
     final appearanceTheme = json['appearanceTheme'];
     final interfaceDensity = json['interfaceDensity'];
     final quickTagShortcut = json['quickTagShortcut'];
+    final floatingTargetX = json['floatingTargetX'];
+    final floatingTargetY = json['floatingTargetY'];
     if (json['version'] != 1 ||
         json['moveImportsByDefault'] is! bool ||
         (floatingDropTargetEnabled != null &&
@@ -70,7 +93,10 @@ class UserPreferences {
             !const {'light', 'dark'}.contains(appearanceTheme) ||
         (interfaceDensity != null || interfaceDensity is String) &&
             !const {'compact', 'comfortable'}.contains(interfaceDensity) ||
-        (quickTagShortcut != null && quickTagShortcut is! String)) {
+        (quickTagShortcut != null && quickTagShortcut is! String) ||
+        (json['uniqueTagNames'] != null && json['uniqueTagNames'] is! bool) ||
+        (floatingTargetX != null && floatingTargetX is! num) ||
+        (floatingTargetY != null && floatingTargetY is! num)) {
       throw const FormatException('TAGTAG 设置文件无效');
     }
     return UserPreferences(
@@ -81,6 +107,9 @@ class UserPreferences {
       appearanceTheme: appearanceTheme as String? ?? 'light',
       interfaceDensity: interfaceDensity as String? ?? 'compact',
       quickTagShortcut: quickTagShortcut as String? ?? 'Ctrl+Shift+T',
+      uniqueTagNames: json['uniqueTagNames'] as bool? ?? false,
+      floatingTargetX: (floatingTargetX as num?)?.toDouble(),
+      floatingTargetY: (floatingTargetY as num?)?.toDouble(),
     );
   }
 }

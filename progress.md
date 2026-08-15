@@ -1,5 +1,13 @@
 # 进度日志
 
+## 会话：2026-08-15（悬浮接收目标交互）
+
+- 按 `.scratch/floating-target-interaction/spec.md` 实现悬浮球拖动、边缘吸附停靠、悬停滑出与接近辉光；原生状态全部收敛在 `FlutterWindow` 成员，Dart 只承担位置持久化 seam。
+- 拖动：WM_LBUTTONDOWN 捕获并记录光标-窗口偏移，超过 4px 才进入拖动（未拖动松开仍激活 Quick Tag）；释放后按当前显示器工作区吸附最近左右边缘，16ms 定时器 ease-out cubic 滑入约三分之一可见的停靠态。
+- 悬停经 TrackMouseEvent/WM_MOUSELEAVE 驱动停靠球滑出/滑回；WH_MOUSE_LL 钩子只做膨胀矩形命中 + VK_LBUTTON 检查并 PostMessage 状态变化，按住左键靠近时 55ms 定时器以 0.35-0.75 alpha 脉动重绘"logo + 软光环"分层像素（文件拖动无法全局识别，近似为"左键按住靠近"，代码注释已说明）。
+- 位置持久化：`UserPreferences` 新增可空 `floatingTargetX/Y`（容错解析，版本仍为 1）；原生拖动结束回调 `savePosition`（逻辑完全可见中心），启用时 Dart 经 `setPosition` 恢复并在贴边 6px 内还原停靠；位置写入不进入设置日志。
+- 验证：`analyze --no-pub` 0 问题；全量测试 129/129 通过（新增通道回传、偏好容错回写、位置变更不写日志共 4 项）；`flutter_window.cpp` 在 /W4 /WX 下编译通过。Release 链接被会话前启动且窗口可见的既有 tagtag.exe（PID 18648）占用失败（LNK1104），该实例同时持有单实例 Mutex；真机验证脚本已就绪（`.scratch/floating-target-interaction/verify_floating_target.py`），待既有实例退出后重跑构建与脚本补齐证据，任务卡 01/02 暂保持 claimed。
+
 ## 会话：2026-08-10（SQLite 标签元数据统一）
 
 - 用户要求继续开发。按本地 issue tracker 与领域文档复核后，阶段 9 尚余两项：标签状态从应用数据 JSON 迁入资料库 SQLite，以及里程碑 2 的系统入口。

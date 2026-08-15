@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 
+#include <cmath>
 #include <optional>
 #include <shellapi.h>
 #include <sstream>
@@ -24,6 +25,49 @@ constexpr wchar_t kTrayTooltip[] = L"TAGTAG";
 constexpr wchar_t kFloatingDropTargetClassName[] =
     L"TAGTAG_FLOATING_DROP_TARGET";
 constexpr int kFloatingDropTargetSize = 64;
+constexpr UINT kFloatingDropTargetProximityMessage = WM_APP + 2;
+constexpr UINT_PTR kFloatingDropTargetSlideTimer = 1;
+constexpr UINT_PTR kFloatingDropTargetGlowTimer = 2;
+constexpr DWORD kFloatingDropTargetSlideStepMs = 16;
+constexpr DWORD kFloatingDropTargetSlideMs = 180;
+constexpr DWORD kFloatingDropTargetGlowStepMs = 55;
+constexpr DWORD kFloatingDropTargetGlowPeriodMs = 900;
+constexpr LONG kFloatingDropTargetDragThreshold = 4;
+constexpr int kFloatingDropTargetProximityMargin = 64;
+constexpr LONG kFloatingDropTargetEdgeSlack = 6;
+
+struct FloatingDropTargetHookState {
+  HWND window = nullptr;
+  bool active = false;
+};
+
+FloatingDropTargetHookState g_floating_drop_target_hook;
+
+// Low-level mouse hooks cannot reliably distinguish file drags from other
+// drags globally, so the proximity approximation is "left button held while
+// moving near the ball". Keep this O(1) and allocation-free: hit-test an
+// inflated window rect and post state changes only.
+LRESULT CALLBACK FloatingDropTargetProximityProc(int code, WPARAM wparam,
+                                                 LPARAM lparam) {
+  if (code == HC_ACTION && g_floating_drop_target_hook.window != nullptr &&
+      (wparam == WM_MOUSEMOVE || wparam == WM_LBUTTONDOWN ||
+       wparam == WM_LBUTTONUP)) {
+    const auto& info = *reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam);
+    RECT rect{};
+    GetWindowRect(g_floating_drop_target_hook.window, &rect);
+    InflateRect(&rect, kFloatingDropTargetProximityMargin,
+                kFloatingDropTargetProximityMargin);
+    const bool active =
+        PtInRect(&rect, info.pt) != FALSE && GetKeyState(VK_LBUTTON) < 0;
+    if (active != g_floating_drop_target_hook.active) {
+      g_floating_drop_target_hook.active = active;
+      PostMessage(g_floating_drop_target_hook.window,
+                  kFloatingDropTargetProximityMessage,
+                  static_cast<WPARAM>(active ? 1 : 0), 0);
+    }
+  }
+  return CallNextHookEx(nullptr, code, wparam, lparam);
+}
 
 const std::string* StringArgument(const flutter::MethodCall<flutter::EncodableValue>& call,
                                   const char* name) {
@@ -54,6 +98,29 @@ std::optional<int64_t> IntegerArgument(
   }
   if (const auto* value = std::get_if<int64_t>(&iterator->second)) {
     return *value;
+  }
+  return std::nullopt;
+}
+
+std::optional<double> DoubleArgument(
+    const flutter::MethodCall<flutter::EncodableValue>& call,
+    const char* name) {
+  const auto* arguments = std::get_if<flutter::EncodableMap>(call.arguments());
+  if (arguments == nullptr) {
+    return std::nullopt;
+  }
+  const auto iterator = arguments->find(flutter::EncodableValue(name));
+  if (iterator == arguments->end()) {
+    return std::nullopt;
+  }
+  if (const auto* value = std::get_if<double>(&iterator->second)) {
+    return *value;
+  }
+  if (const auto* value = std::get_if<int32_t>(&iterator->second)) {
+    return static_cast<double>(*value);
+  }
+  if (const auto* value = std::get_if<int64_t>(&iterator->second)) {
+    return static_cast<double>(*value);
   }
   return std::nullopt;
 }
@@ -212,6 +279,25 @@ bool FlutterWindow::OnCreate() {
               flutter::EncodableValue(SetFloatingDropTargetEnabled(*enabled)));
           return;
         }
+        if (call.method_name() == "setPosition") {
+          const auto x = DoubleArgument(call, "x");
+          const auto y = DoubleArgument(call, "y");
+          if (!x.has_value() || !y.has_value()) {
+            result->Error("invalid_arguments",
+                          "Floating drop target position requires x and y");
+            return;
+          }
+          floating_drop_target_position_ =
+              POINT{static_cast<LONG>(std::lround(*x)),
+                    static_cast<LONG>(std::lround(*y))};
+          if (floating_drop_target_window_ != nullptr &&
+              IsWindowVisible(floating_drop_target_window_) &&
+              !floating_drop_target_captured_) {
+            ApplyFloatingDropTargetPosition();
+          }
+          result->Success(flutter::EncodableValue(true));
+          return;
+        }
         if (call.method_name() == "isEnabled") {
           result->Success(flutter::EncodableValue(floating_drop_target_enabled_));
           return;
@@ -345,8 +431,23 @@ bool FlutterWindow::SetFloatingDropTargetEnabled(bool enabled) {
   }
   floating_drop_target_enabled_ = enabled;
   if (enabled) {
+    InstallFloatingDropTargetHook();
     ShowFloatingDropTarget();
   } else if (floating_drop_target_window_ != nullptr) {
+    UninstallFloatingDropTargetHook();
+    KillTimer(floating_drop_target_window_, kFloatingDropTargetSlideTimer);
+    KillTimer(floating_drop_target_window_, kFloatingDropTargetGlowTimer);
+    floating_drop_target_sliding_ = false;
+    floating_drop_target_glow_ = false;
+    floating_drop_target_hover_ = false;
+    floating_drop_target_tracking_leave_ = false;
+    if (floating_drop_target_captured_) {
+      ReleaseCapture();
+      floating_drop_target_captured_ = false;
+      floating_drop_target_dragging_ = false;
+    }
+    // Restore the logo-only pixels in case a glow frame was showing.
+    UpdateFloatingDropTargetPixels(0);
     ShowWindow(floating_drop_target_window_, SW_HIDE);
   }
   return true;
@@ -381,13 +482,15 @@ bool FlutterWindow::CreateFloatingDropTarget() {
     return false;
   }
   DragAcceptFiles(floating_drop_target_window_, TRUE);
-  UpdateFloatingDropTargetPixels();
+  UpdateFloatingDropTargetPixels(0);
   return true;
 }
 
 // Renders the app icon with per-pixel alpha so the floating target shows
-// only the logo, no background disc.
-void FlutterWindow::UpdateFloatingDropTargetPixels() {
+// only the logo, no background disc. When glow_alpha is above zero a soft
+// ring is composited over the logo for the proximity "ready to accept"
+// pulse; the ring pixels are premultiplied src-over in place.
+void FlutterWindow::UpdateFloatingDropTargetPixels(int glow_alpha) {
   if (floating_drop_target_window_ == nullptr) {
     return;
   }
@@ -432,6 +535,43 @@ void FlutterWindow::UpdateFloatingDropTargetPixels() {
     pixels[index * 4 + 2] =
         static_cast<unsigned char>((pixels[index * 4 + 2] * alpha + 127) / 255);
   }
+  if (glow_alpha > 0) {
+    const double center = (size - 1) / 2.0;
+    const double outer = size / 2.0 - 1.0;
+    const double inner = outer - 5.0;
+    const int ring_red = 150;
+    const int ring_green = 182;
+    const int ring_blue = 250;
+    for (int row = 0; row < size; ++row) {
+      for (int column = 0; column < size; ++column) {
+        const double dx = column - center;
+        const double dy = row - center;
+        const double distance = std::sqrt(dx * dx + dy * dy);
+        double coverage = 0.0;
+        if (distance >= inner && distance <= outer) {
+          coverage = 1.0;
+        } else if (distance > inner - 2.0 && distance < inner) {
+          coverage = (distance - (inner - 2.0)) / 2.0;
+        } else if (distance > outer && distance < outer + 2.0) {
+          coverage = 1.0 - (distance - outer) / 2.0;
+        }
+        if (coverage <= 0.0) {
+          continue;
+        }
+        const int alpha = static_cast<int>(glow_alpha * coverage);
+        const int inverse = 255 - alpha;
+        unsigned char* pixel = pixels + (row * size + column) * 4;
+        pixel[0] = static_cast<unsigned char>(
+            (ring_blue * alpha + pixel[0] * inverse + 127) / 255);
+        pixel[1] = static_cast<unsigned char>(
+            (ring_green * alpha + pixel[1] * inverse + 127) / 255);
+        pixel[2] = static_cast<unsigned char>(
+            (ring_red * alpha + pixel[2] * inverse + 127) / 255);
+        pixel[3] = static_cast<unsigned char>(
+            (255 * alpha + pixel[3] * inverse + 127) / 255);
+      }
+    }
+  }
   RECT window_rect{};
   GetWindowRect(floating_drop_target_window_, &window_rect);
   POINT destination{window_rect.left, window_rect.top};
@@ -450,6 +590,7 @@ void FlutterWindow::UpdateFloatingDropTargetPixels() {
 }
 
 void FlutterWindow::DestroyFloatingDropTarget() {
+  UninstallFloatingDropTargetHook();
   if (floating_drop_target_window_ != nullptr) {
     DragAcceptFiles(floating_drop_target_window_, FALSE);
     DestroyWindow(floating_drop_target_window_);
@@ -460,10 +601,24 @@ void FlutterWindow::DestroyFloatingDropTarget() {
     floating_drop_target_class_registered_ = false;
   }
   floating_drop_target_enabled_ = false;
+  floating_drop_target_captured_ = false;
+  floating_drop_target_dragging_ = false;
+  floating_drop_target_snap_ = FloatingTargetSnap::kNone;
+  floating_drop_target_hover_ = false;
+  floating_drop_target_tracking_leave_ = false;
+  floating_drop_target_expanded_ = false;
+  floating_drop_target_glow_ = false;
+  floating_drop_target_sliding_ = false;
 }
 
 void FlutterWindow::ShowFloatingDropTarget() {
   if (floating_drop_target_window_ == nullptr) {
+    return;
+  }
+  if (floating_drop_target_position_.has_value()) {
+    ApplyFloatingDropTargetPosition();
+    SetWindowPos(floating_drop_target_window_, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
     return;
   }
   RECT work_area{};
@@ -471,11 +626,212 @@ void FlutterWindow::ShowFloatingDropTarget() {
     return;
   }
   const int margin = 18;
+  floating_drop_target_snap_ = FloatingTargetSnap::kNone;
+  floating_drop_target_expanded_ = false;
   SetWindowPos(floating_drop_target_window_, HWND_TOPMOST,
                work_area.right - kFloatingDropTargetSize - margin,
                work_area.bottom - kFloatingDropTargetSize - margin,
                kFloatingDropTargetSize, kFloatingDropTargetSize,
                SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+// Applies the persisted logical center, clamped to the nearest monitor work
+// area. A point that lands on a work-area edge restores the docked state.
+void FlutterWindow::ApplyFloatingDropTargetPosition() {
+  const HWND window = floating_drop_target_window_;
+  if (window == nullptr || !floating_drop_target_position_.has_value()) {
+    return;
+  }
+  const POINT saved = *floating_drop_target_position_;
+  const HMONITOR monitor = MonitorFromPoint(saved, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{static_cast<DWORD>(sizeof(monitor_info))};
+  GetMonitorInfoW(monitor, &monitor_info);
+  const RECT work = monitor_info.rcWork;
+  const int size = kFloatingDropTargetSize;
+  const LONG min_cx = work.left + size / 2;
+  const LONG max_cx = work.right - size / 2;
+  const LONG min_cy = work.top + size / 2;
+  const LONG max_cy = work.bottom - size / 2;
+  const LONG cx =
+      saved.x < min_cx ? min_cx : (saved.x > max_cx ? max_cx : saved.x);
+  const LONG cy =
+      saved.y < min_cy ? min_cy : (saved.y > max_cy ? max_cy : saved.y);
+  FloatingTargetSnap snap = FloatingTargetSnap::kNone;
+  LONG left = cx - size / 2;
+  if (cx <= min_cx + kFloatingDropTargetEdgeSlack) {
+    snap = FloatingTargetSnap::kLeft;
+    left = work.left - size / 3;
+  } else if (cx >= max_cx - kFloatingDropTargetEdgeSlack) {
+    snap = FloatingTargetSnap::kRight;
+    left = work.right - size * 2 / 3;
+  }
+  floating_drop_target_snap_ = snap;
+  floating_drop_target_expanded_ = false;
+  SetWindowPos(window, HWND_TOPMOST, left, cy - size / 2, size, size,
+               SWP_NOACTIVATE);
+}
+
+// Starts the edge snap after a drag: slide to the nearest work-area edge and
+// dock the ball roughly one third visible.
+void FlutterWindow::BeginFloatingDropTargetSnap() {
+  const HWND window = floating_drop_target_window_;
+  if (window == nullptr) {
+    return;
+  }
+  RECT rect{};
+  GetWindowRect(window, &rect);
+  const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{static_cast<DWORD>(sizeof(monitor_info))};
+  GetMonitorInfoW(monitor, &monitor_info);
+  const RECT work = monitor_info.rcWork;
+  const int size = kFloatingDropTargetSize;
+  const LONG center_x = rect.left + size / 2;
+  const bool dock_left = center_x * 2 < work.left + work.right;
+  POINT target{};
+  target.x = dock_left ? work.left - size / 3 : work.right - size * 2 / 3;
+  target.y = rect.top < work.top
+                 ? work.top
+                 : (rect.top > work.bottom - size ? work.bottom - size
+                                                  : rect.top);
+  floating_drop_target_expanded_ = false;
+  BeginFloatingDropTargetSlide(target, true,
+                               dock_left ? FloatingTargetSnap::kLeft
+                                         : FloatingTargetSnap::kRight);
+}
+
+void FlutterWindow::BeginFloatingDropTargetSlide(POINT target,
+                                                 bool finalize_snap,
+                                                 FloatingTargetSnap snap) {
+  const HWND window = floating_drop_target_window_;
+  if (window == nullptr) {
+    return;
+  }
+  RECT rect{};
+  GetWindowRect(window, &rect);
+  floating_drop_target_slide_start_.x = rect.left;
+  floating_drop_target_slide_start_.y = rect.top;
+  floating_drop_target_slide_target_ = target;
+  floating_drop_target_slide_start_tick_ = GetTickCount();
+  floating_drop_target_slide_finalize_ = finalize_snap;
+  floating_drop_target_slide_snap_ = snap;
+  floating_drop_target_sliding_ = true;
+  SetTimer(window, kFloatingDropTargetSlideTimer, kFloatingDropTargetSlideStepMs,
+           nullptr);
+}
+
+void FlutterWindow::CompleteFloatingDropTargetSlide() {
+  if (!floating_drop_target_slide_finalize_) {
+    return;
+  }
+  floating_drop_target_slide_finalize_ = false;
+  floating_drop_target_snap_ = floating_drop_target_slide_snap_;
+  const HWND window = floating_drop_target_window_;
+  if (window == nullptr || floating_drop_target_channel_ == nullptr) {
+    return;
+  }
+  const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{static_cast<DWORD>(sizeof(monitor_info))};
+  GetMonitorInfoW(monitor, &monitor_info);
+  const RECT work = monitor_info.rcWork;
+  const int size = kFloatingDropTargetSize;
+  RECT rect{};
+  GetWindowRect(window, &rect);
+  // Report the logical fully-visible center so a restart can restore the
+  // docked state for points that sit on a work-area edge.
+  double logical_x = rect.left + size / 2.0;
+  if (floating_drop_target_snap_ == FloatingTargetSnap::kLeft) {
+    logical_x = work.left + size / 2.0;
+  } else if (floating_drop_target_snap_ == FloatingTargetSnap::kRight) {
+    logical_x = work.right - size / 2.0;
+  }
+  const double logical_y = rect.top + size / 2.0;
+  flutter::EncodableMap arguments;
+  arguments[flutter::EncodableValue("x")] = flutter::EncodableValue(logical_x);
+  arguments[flutter::EncodableValue("y")] = flutter::EncodableValue(logical_y);
+  floating_drop_target_channel_->InvokeMethod(
+      "savePosition",
+      std::make_unique<flutter::EncodableValue>(std::move(arguments)));
+}
+
+// Hover or proximity glow slides a docked ball fully out; leaving either
+// state slides it back. Expansion slides may interrupt each other, but never
+// an in-flight drag-end snap.
+void FlutterWindow::UpdateFloatingDropTargetExpansion() {
+  const HWND window = floating_drop_target_window_;
+  if (window == nullptr ||
+      floating_drop_target_snap_ == FloatingTargetSnap::kNone ||
+      floating_drop_target_captured_ ||
+      (floating_drop_target_sliding_ &&
+       floating_drop_target_slide_finalize_)) {
+    return;
+  }
+  const bool expanded =
+      floating_drop_target_hover_ || floating_drop_target_glow_;
+  if (expanded == floating_drop_target_expanded_) {
+    return;
+  }
+  floating_drop_target_expanded_ = expanded;
+  const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{static_cast<DWORD>(sizeof(monitor_info))};
+  GetMonitorInfoW(monitor, &monitor_info);
+  const RECT work = monitor_info.rcWork;
+  const int size = kFloatingDropTargetSize;
+  RECT rect{};
+  GetWindowRect(window, &rect);
+  POINT target{};
+  target.y = rect.top;
+  if (expanded) {
+    target.x = floating_drop_target_snap_ == FloatingTargetSnap::kLeft
+                   ? work.left
+                   : work.right - size;
+  } else {
+    target.x = floating_drop_target_snap_ == FloatingTargetSnap::kLeft
+                   ? work.left - size / 3
+                   : work.right - size * 2 / 3;
+  }
+  BeginFloatingDropTargetSlide(target, false, floating_drop_target_snap_);
+}
+
+void FlutterWindow::SetFloatingDropTargetGlow(bool active) {
+  const HWND window = floating_drop_target_window_;
+  if (window == nullptr || active == floating_drop_target_glow_) {
+    return;
+  }
+  floating_drop_target_glow_ = active;
+  if (active) {
+    floating_drop_target_glow_start_ = GetTickCount();
+    SetTimer(window, kFloatingDropTargetGlowTimer, kFloatingDropTargetGlowStepMs,
+             nullptr);
+  } else {
+    KillTimer(window, kFloatingDropTargetGlowTimer);
+    // Restore the logo-only pixels.
+    UpdateFloatingDropTargetPixels(0);
+  }
+  UpdateFloatingDropTargetExpansion();
+}
+
+void FlutterWindow::InstallFloatingDropTargetHook() {
+  if (floating_drop_target_hook_ != nullptr ||
+      floating_drop_target_window_ == nullptr) {
+    return;
+  }
+  g_floating_drop_target_hook.window = floating_drop_target_window_;
+  g_floating_drop_target_hook.active = false;
+  floating_drop_target_hook_ =
+      SetWindowsHookExW(WH_MOUSE_LL, FloatingDropTargetProximityProc,
+                        GetModuleHandle(nullptr), 0);
+  if (floating_drop_target_hook_ == nullptr) {
+    g_floating_drop_target_hook.window = nullptr;
+  }
+}
+
+void FlutterWindow::UninstallFloatingDropTargetHook() {
+  if (floating_drop_target_hook_ != nullptr) {
+    UnhookWindowsHookEx(floating_drop_target_hook_);
+    floating_drop_target_hook_ = nullptr;
+  }
+  g_floating_drop_target_hook.window = nullptr;
+  g_floating_drop_target_hook.active = false;
 }
 
 LRESULT CALLBACK FlutterWindow::FloatingDropTargetWndProc(
@@ -513,7 +869,127 @@ LRESULT FlutterWindow::HandleFloatingDropTargetMessage(
       EndPaint(window, &paint);
       return 0;
     }
+    case WM_LBUTTONDOWN: {
+      SetCapture(window);
+      floating_drop_target_captured_ = true;
+      floating_drop_target_dragging_ = false;
+      POINT cursor{};
+      GetCursorPos(&cursor);
+      floating_drop_target_press_point_ = cursor;
+      RECT rect{};
+      GetWindowRect(window, &rect);
+      floating_drop_target_grab_offset_.x = cursor.x - rect.left;
+      floating_drop_target_grab_offset_.y = cursor.y - rect.top;
+      return 0;
+    }
+    case WM_MOUSEMOVE: {
+      POINT cursor{};
+      GetCursorPos(&cursor);
+      if (floating_drop_target_captured_) {
+        const LONG dx = cursor.x - floating_drop_target_press_point_.x;
+        const LONG dy = cursor.y - floating_drop_target_press_point_.y;
+        if (!floating_drop_target_dragging_ &&
+            (dx > kFloatingDropTargetDragThreshold ||
+             dx < -kFloatingDropTargetDragThreshold ||
+             dy > kFloatingDropTargetDragThreshold ||
+             dy < -kFloatingDropTargetDragThreshold)) {
+          floating_drop_target_dragging_ = true;
+          // Interrupt any slide; the ball leaves the docked state at once.
+          KillTimer(window, kFloatingDropTargetSlideTimer);
+          floating_drop_target_sliding_ = false;
+          floating_drop_target_slide_finalize_ = false;
+          floating_drop_target_snap_ = FloatingTargetSnap::kNone;
+          floating_drop_target_expanded_ = false;
+          SetFloatingDropTargetGlow(false);
+        }
+        if (floating_drop_target_dragging_) {
+          SetWindowPos(window, nullptr,
+                       cursor.x - floating_drop_target_grab_offset_.x,
+                       cursor.y - floating_drop_target_grab_offset_.y, 0, 0,
+                       SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        return 0;
+      }
+      floating_drop_target_hover_ = true;
+      if (!floating_drop_target_tracking_leave_) {
+        TRACKMOUSEEVENT tracking{static_cast<DWORD>(sizeof(tracking)), TME_LEAVE, window, 0};
+        TrackMouseEvent(&tracking);
+        floating_drop_target_tracking_leave_ = true;
+      }
+      UpdateFloatingDropTargetExpansion();
+      return 0;
+    }
+    case WM_MOUSELEAVE:
+      floating_drop_target_tracking_leave_ = false;
+      floating_drop_target_hover_ = false;
+      UpdateFloatingDropTargetExpansion();
+      return 0;
+    case WM_TIMER: {
+      if (wparam == kFloatingDropTargetSlideTimer) {
+        const DWORD elapsed =
+            GetTickCount() - floating_drop_target_slide_start_tick_;
+        double progress =
+            static_cast<double>(elapsed) / kFloatingDropTargetSlideMs;
+        const bool done = progress >= 1.0;
+        if (done) {
+          progress = 1.0;
+        }
+        // Ease-out cubic.
+        const double ease = 1.0 - std::pow(1.0 - progress, 3.0);
+        const int x = floating_drop_target_slide_start_.x +
+                      static_cast<int>(
+                          (floating_drop_target_slide_target_.x -
+                           floating_drop_target_slide_start_.x) *
+                          ease);
+        const int y = floating_drop_target_slide_start_.y +
+                      static_cast<int>(
+                          (floating_drop_target_slide_target_.y -
+                           floating_drop_target_slide_start_.y) *
+                          ease);
+        SetWindowPos(window, nullptr, x, y, 0, 0,
+                     SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        if (done) {
+          KillTimer(window, kFloatingDropTargetSlideTimer);
+          floating_drop_target_sliding_ = false;
+          CompleteFloatingDropTargetSlide();
+        }
+        return 0;
+      }
+      if (wparam == kFloatingDropTargetGlowTimer) {
+        if (!floating_drop_target_glow_) {
+          KillTimer(window, kFloatingDropTargetGlowTimer);
+          return 0;
+        }
+        const DWORD elapsed =
+            (GetTickCount() - floating_drop_target_glow_start_) %
+            kFloatingDropTargetGlowPeriodMs;
+        const double phase = static_cast<double>(elapsed) /
+                             kFloatingDropTargetGlowPeriodMs;
+        // Pulse between alpha 0.35 and 0.75 over one glow period.
+        const double wave =
+            0.55 + 0.20 * std::sin(phase * 6.283185307179586);
+        UpdateFloatingDropTargetPixels(static_cast<int>(wave * 255.0));
+        return 0;
+      }
+      break;
+    }
+    case kFloatingDropTargetProximityMessage:
+      // Ignore proximity while the ball itself is being dragged.
+      if (!floating_drop_target_captured_) {
+        SetFloatingDropTargetGlow(wparam != 0);
+      }
+      return 0;
     case WM_LBUTTONUP:
+      if (!floating_drop_target_captured_) {
+        return 0;
+      }
+      ReleaseCapture();
+      floating_drop_target_captured_ = false;
+      if (floating_drop_target_dragging_) {
+        floating_drop_target_dragging_ = false;
+        BeginFloatingDropTargetSnap();
+        return 0;
+      }
       ActivateQuickTag(GetHandle());
       return 0;
     case WM_DROPFILES: {

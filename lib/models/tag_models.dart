@@ -18,6 +18,8 @@ enum TagDomainOperationType {
 
 enum SearchKindFilter { all, file, folder }
 
+enum TagNamePolicy { inherit, unique, free }
+
 String newId(String prefix) {
   final random = Random.secure().nextInt(1 << 32).toRadixString(16);
   return '$prefix-${DateTime.now().microsecondsSinceEpoch}-$random';
@@ -54,6 +56,7 @@ class TagDefinition {
     required this.name,
     required this.colorValue,
     required this.createdAt,
+    this.namePolicy = TagNamePolicy.inherit,
   });
 
   final String id;
@@ -62,12 +65,22 @@ class TagDefinition {
   final int colorValue;
   final DateTime createdAt;
 
-  TagDefinition copyWith({String? name, int? colorValue}) => TagDefinition(
+  /// inherit = follow the global uniqueTagNames preference; unique = never
+  /// allow a same-name tag in the space; free = allow even when the global
+  /// preference is on.
+  final TagNamePolicy namePolicy;
+
+  TagDefinition copyWith({
+    String? name,
+    int? colorValue,
+    TagNamePolicy? namePolicy,
+  }) => TagDefinition(
     id: id,
     spaceId: spaceId,
     name: name ?? this.name,
     colorValue: colorValue ?? this.colorValue,
     createdAt: createdAt,
+    namePolicy: namePolicy ?? this.namePolicy,
   );
 
   Map<String, dynamic> toJson() => {
@@ -76,6 +89,7 @@ class TagDefinition {
     'name': name,
     'colorValue': colorValue,
     'createdAt': createdAt.toIso8601String(),
+    'namePolicy': namePolicy.name,
   };
 
   factory TagDefinition.fromJson(Map<String, dynamic> json) => TagDefinition(
@@ -84,6 +98,9 @@ class TagDefinition {
     name: json['name'] as String,
     colorValue: json['colorValue'] as int,
     createdAt: DateTime.parse(json['createdAt'] as String),
+    namePolicy:
+        TagNamePolicy.values.asNameMap()[json['namePolicy'] as String?] ??
+        TagNamePolicy.inherit,
   );
 }
 

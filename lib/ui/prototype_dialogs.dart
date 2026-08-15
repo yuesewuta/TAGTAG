@@ -861,6 +861,7 @@ class PrototypeSettingsResult {
     required this.appearanceTheme,
     required this.interfaceDensity,
     required this.quickTagShortcut,
+    required this.uniqueTagNames,
   });
 
   final bool moveImportsByDefault;
@@ -870,6 +871,7 @@ class PrototypeSettingsResult {
   final String appearanceTheme;
   final String interfaceDensity;
   final String quickTagShortcut;
+  final bool uniqueTagNames;
 }
 
 enum PrototypeSettingsSection { general, imports, storage, windows, appearance }
@@ -915,6 +917,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
   late String _appearanceTheme;
   late String _interfaceDensity;
   late String _quickTagShortcut;
+  late bool _uniqueTagNames;
   PrototypeSettingsSection _section = PrototypeSettingsSection.general;
   final FocusNode _shortcutFocusNode = FocusNode();
   bool _recording = false;
@@ -931,6 +934,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
     _appearanceTheme = preferences.appearanceTheme;
     _interfaceDensity = preferences.interfaceDensity;
     _quickTagShortcut = preferences.quickTagShortcut;
+    _uniqueTagNames = preferences.uniqueTagNames;
   }
 
   @override
@@ -998,6 +1002,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
                   appearanceTheme: _appearanceTheme,
                   interfaceDensity: _interfaceDensity,
                   quickTagShortcut: _quickTagShortcut,
+                  uniqueTagNames: _uniqueTagNames,
                 ),
               ),
               icon: const Icon(Icons.check, size: 17),
@@ -1101,6 +1106,15 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
       subtitle: '导入后进入当前空间待整理区',
       compact: compact,
       trailing: const Text('允许', style: TextStyle(fontWeight: FontWeight.w600)),
+    ),
+    _SettingRow(
+      title: '标签名称全局唯一',
+      subtitle: '同名标签默认唯一；仍可在标签操作中单独豁免',
+      compact: compact,
+      trailing: Switch(
+        value: _uniqueTagNames,
+        onChanged: (value) => setState(() => _uniqueTagNames = value),
+      ),
     ),
   ];
 

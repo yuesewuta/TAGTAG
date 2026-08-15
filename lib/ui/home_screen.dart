@@ -77,6 +77,12 @@ class _TagTagHomeState extends State<TagTagHome> {
     _quickTagHotkey = widget.quickTagHotkey ?? WindowsQuickTagHotkey();
     _floatingDropTarget =
         widget.floatingDropTarget ?? WindowsFloatingDropTarget();
+    _floatingDropTarget.start(
+      (x, y) => controller.updatePreferences(
+        floatingTargetX: x,
+        floatingTargetY: y,
+      ),
+    );
     _closeBehavior = WindowsCloseBehavior();
     unawaited(
       _closeBehavior.setCloseToTray(controller.preferences.closeToTray),
@@ -105,6 +111,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     _searchFocusNode.dispose();
     _consistencyTimer?.cancel();
     unawaited(_quickTagHotkey.dispose());
+    unawaited(_floatingDropTarget.dispose());
     super.dispose();
   }
 
@@ -241,11 +248,12 @@ class _TagTagHomeState extends State<TagTagHome> {
       startupView: result.startupView,
       appearanceTheme: result.appearanceTheme,
       interfaceDensity: result.interfaceDensity,
+      uniqueTagNames: result.uniqueTagNames,
       quickTagShortcut: shortcutRegistered == false
           ? controller.preferences.quickTagShortcut
           : result.quickTagShortcut,
     );
-    final floatingTargetEnabled = await _floatingDropTarget.setEnabled(
+    final floatingTargetEnabled = await _applyFloatingDropTarget(
       result.floatingDropTargetEnabled,
     );
     unawaited(_closeBehavior.setCloseToTray(result.closeToTray));
@@ -460,10 +468,19 @@ class _TagTagHomeState extends State<TagTagHome> {
 
   Future<void> _configureFloatingDropTarget() async {
     final enabled = controller.preferences.floatingDropTargetEnabled;
-    final applied = await _floatingDropTarget.setEnabled(enabled);
+    final applied = await _applyFloatingDropTarget(enabled);
     if (mounted && enabled && applied == false) {
       _showMessage('悬浮接收目标未能启动。', error: true);
     }
+  }
+
+  Future<bool?> _applyFloatingDropTarget(bool enabled) async {
+    final x = controller.preferences.floatingTargetX;
+    final y = controller.preferences.floatingTargetY;
+    if (x != null && y != null) {
+      await _floatingDropTarget.setPosition(x, y);
+    }
+    return _floatingDropTarget.setEnabled(enabled);
   }
 
   Future<void> _handleGlobalQuickTag(List<String> externalPaths) async {
