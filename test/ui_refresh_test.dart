@@ -359,6 +359,47 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
+  testWidgets('advanced search dialog applies size filters', (tester) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    await tester.tap(find.byKey(const ValueKey('nav-搜索')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('高级筛选'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('大小（MB）'), findsWidgets);
+    expect(find.text('创建时间'), findsWidgets);
+    expect(find.text('修改时间'), findsWidgets);
+    await tester.enterText(
+      find.byKey(const ValueKey('advanced-min-size')),
+      '2',
+    );
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+
+    expect(fixture.controller.searchMinimumSizeBytes, 2 * 1024 * 1024);
+    expect(fixture.controller.hasAdvancedSearchFilters, isTrue);
+
+    // Reopen and clear everything.
+    await tester.tap(find.byTooltip('高级筛选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('清除全部条件'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用'));
+    await tester.pumpAndSettle();
+    expect(fixture.controller.searchMinimumSizeBytes, isNull);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Escape closes the status drawer before anything else', (
     tester,
   ) async {

@@ -3260,6 +3260,7 @@ class _SearchFilterStrip extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
+          _AdvancedSearchButton(controller: controller),
           TextButton.icon(
             key: const ValueKey('save-search-query'),
             onPressed: controller.hasActiveSearchCondition
@@ -3333,6 +3334,315 @@ class _SearchFilterStrip extends StatelessWidget {
               label: const Text('保存'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdvancedSearchButton extends StatelessWidget {
+  const _AdvancedSearchButton({required this.controller});
+
+  final TagTagController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final active =
+        controller.searchMinimumSizeBytes != null ||
+        controller.searchMaximumSizeBytes != null ||
+        controller.searchCreatedFrom != null ||
+        controller.searchCreatedTo != null ||
+        controller.searchModifiedFrom != null ||
+        controller.searchModifiedTo != null;
+    final palette = _palette(context);
+    return IconButton(
+      tooltip: '高级筛选',
+      onPressed: () => unawaited(_showAdvancedSearch(context)),
+      icon: Icon(
+        Icons.tune,
+        size: 18,
+        color: active ? palette.primary : palette.textMuted,
+      ),
+    );
+  }
+
+  Future<void> _showAdvancedSearch(BuildContext context) async {
+    await showPrototypeDialog<void>(
+      context: context,
+      builder: (context) => _AdvancedSearchDialog(controller: controller),
+    );
+  }
+}
+
+class _AdvancedSearchDialog extends StatefulWidget {
+  const _AdvancedSearchDialog({required this.controller});
+
+  final TagTagController controller;
+
+  @override
+  State<_AdvancedSearchDialog> createState() => _AdvancedSearchDialogState();
+}
+
+class _AdvancedSearchDialogState extends State<_AdvancedSearchDialog> {
+  late final TextEditingController _minSizeController;
+  late final TextEditingController _maxSizeController;
+  DateTime? _createdFrom;
+  DateTime? _createdTo;
+  DateTime? _modifiedFrom;
+  DateTime? _modifiedTo;
+
+  @override
+  void initState() {
+    super.initState();
+    final controller = widget.controller;
+    _minSizeController = TextEditingController(
+      text: _megabytesLabel(controller.searchMinimumSizeBytes),
+    );
+    _maxSizeController = TextEditingController(
+      text: _megabytesLabel(controller.searchMaximumSizeBytes),
+    );
+    _createdFrom = controller.searchCreatedFrom;
+    _createdTo = controller.searchCreatedTo;
+    _modifiedFrom = controller.searchModifiedFrom;
+    _modifiedTo = controller.searchModifiedTo;
+  }
+
+  @override
+  void dispose() {
+    _minSizeController.dispose();
+    _maxSizeController.dispose();
+    super.dispose();
+  }
+
+  static String _megabytesLabel(int? bytes) {
+    if (bytes == null) return '';
+    final megabytes = bytes / (1024 * 1024);
+    return megabytes == megabytes.roundToDouble()
+        ? megabytes.toStringAsFixed(0)
+        : megabytes.toStringAsFixed(1);
+  }
+
+  static int? _parseMegabytes(String text) {
+    final value = double.tryParse(text.trim());
+    if (value == null || value < 0) return null;
+    return (value * 1024 * 1024).round();
+  }
+
+  Future<void> _pickDate(bool created, bool from) async {
+    final initial = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (created) {
+        if (from) {
+          _createdFrom = picked;
+        } else {
+          _createdTo = picked;
+        }
+      } else {
+        if (from) {
+          _modifiedFrom = picked;
+        } else {
+          _modifiedTo = picked;
+        }
+      }
+    });
+  }
+
+  void _apply() {
+    final controller = widget.controller;
+    controller.setSearchSizeRange(
+      minimumBytes: _parseMegabytes(_minSizeController.text),
+      maximumBytes: _parseMegabytes(_maxSizeController.text),
+    );
+    controller.setSearchCreatedRange(from: _createdFrom, to: _createdTo);
+    controller.setSearchModifiedRange(from: _modifiedFrom, to: _modifiedTo);
+    Navigator.pop(context);
+  }
+
+  void _clearAll() {
+    setState(() {
+      _minSizeController.clear();
+      _maxSizeController.clear();
+      _createdFrom = null;
+      _createdTo = null;
+      _modifiedFrom = null;
+      _modifiedTo = null;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PrototypeDialogFrame(
+      width: 520,
+      desktopHeight: null,
+      icon: Icons.tune,
+      title: '高级筛选',
+      subtitle: '按大小和时间缩小搜索范围',
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _AdvancedSection(
+              label: '大小（MB）',
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('advanced-min-size'),
+                      controller: _minSizeController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(hintText: '最小'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextField(
+                      key: const ValueKey('advanced-max-size'),
+                      controller: _maxSizeController,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(hintText: '最大'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _AdvancedSection(
+              label: '创建时间',
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _DateField(
+                      key: const ValueKey('advanced-created-from'),
+                      value: _createdFrom,
+                      hint: '起始',
+                      onTap: () => _pickDate(true, true),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DateField(
+                      key: const ValueKey('advanced-created-to'),
+                      value: _createdTo,
+                      hint: '结束',
+                      onTap: () => _pickDate(true, false),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            _AdvancedSection(
+              label: '修改时间',
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _DateField(
+                      key: const ValueKey('advanced-modified-from'),
+                      value: _modifiedFrom,
+                      hint: '起始',
+                      onTap: () => _pickDate(false, true),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DateField(
+                      key: const ValueKey('advanced-modified-to'),
+                      value: _modifiedTo,
+                      hint: '结束',
+                      onTap: () => _pickDate(false, false),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: _clearAll,
+                child: const Text('清除全部条件'),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(onPressed: _apply, child: const Text('应用')),
+      ],
+    );
+  }
+}
+
+class _AdvancedSection extends StatelessWidget {
+  const _AdvancedSection({required this.label, required this.child});
+  final String label;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+      const SizedBox(height: 5),
+      child,
+    ],
+  );
+}
+
+class _DateField extends StatelessWidget {
+  const _DateField({
+    super.key,
+    required this.value,
+    required this.hint,
+    required this.onTap,
+  });
+
+  final DateTime? value;
+  final String hint;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = _palette(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        height: 34,
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: palette.surface,
+          border: Border.all(color: palette.border),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          value == null
+              ? hint
+              : '${value!.year}/${value!.month}/${value!.day}',
+          style: TextStyle(
+            fontSize: 12,
+            color: value == null ? palette.textFaint : palette.text,
+          ),
         ),
       ),
     );
