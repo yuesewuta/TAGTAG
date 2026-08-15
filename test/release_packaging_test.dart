@@ -5,14 +5,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yaml/yaml.dart';
 
 void main() {
-  test('project version stays on a valid pre-1.0 SemVer baseline', () async {
+  test('project version stays on a valid SemVer baseline', () async {
     final pubspec =
         loadYaml(await File('pubspec.yaml').readAsString()) as YamlMap;
     final version = pubspec['version'] as String;
     final match = RegExp(r'^(\d+)\.(\d+)\.(\d+)\+(\d+)$').firstMatch(version);
 
+    // Since v1.0.0 the project is treated as stable; any MAJOR is valid.
     expect(match, isNotNull);
-    expect(match!.group(1), '0');
+    expect(int.parse(match!.group(1)!), greaterThanOrEqualTo(0));
   });
 
   test(
