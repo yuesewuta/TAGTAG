@@ -34,14 +34,19 @@ void main() {
       ),
       (_) {},
     );
-    expect(activations, [isEmpty, [r'C:\资料\项目.txt']]);
+    expect(activations, [
+      isEmpty,
+      [r'C:\资料\项目.txt'],
+    ]);
     await hotkey.dispose();
     await messenger.handlePlatformMessage(
       channel.name,
       channel.codec.encodeMethodCall(const MethodCall('activated')),
       (_) {},
     );
-    expect(activations, [isEmpty, [r'C:\资料\项目.txt']]);
+    expect(activations, [
+      isEmpty,
+      [r'C:\资料\项目.txt'],
+    ]);
   });
-
 }

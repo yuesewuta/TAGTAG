@@ -15,6 +15,7 @@ import '../platform/windows_quick_tag_hotkey.dart';
 import '../services/space_portability.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
+import 'glass.dart';
 import 'prototype_dialogs.dart';
 import 'prototype_workspace.dart';
 import 'tagtag_theme.dart';
@@ -78,10 +79,8 @@ class _TagTagHomeState extends State<TagTagHome> {
     _floatingDropTarget =
         widget.floatingDropTarget ?? WindowsFloatingDropTarget();
     _floatingDropTarget.start(
-      (x, y) => controller.updatePreferences(
-        floatingTargetX: x,
-        floatingTargetY: y,
-      ),
+      (x, y) =>
+          controller.updatePreferences(floatingTargetX: x, floatingTargetY: y),
     );
     _closeBehavior = WindowsCloseBehavior();
     unawaited(
@@ -1879,15 +1878,40 @@ class _TagDialogState extends State<_TagDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (widget.allowReuse) ...[
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('复用已有标签实体'),
-                subtitle: const Text('在另一条路径显示同一个标签'),
-                value: _reuse,
-                onChanged: (value) => setState(() {
-                  _reuse = value;
+              InkWell(
+                onTap: () => setState(() {
+                  _reuse = !_reuse;
                   _reuseTagId = null;
                 }),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '复用已有标签实体',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                            Text(
+                              '在另一条路径显示同一个标签',
+                              style: TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      PillSwitch(
+                        value: _reuse,
+                        onChanged: (value) => setState(() {
+                          _reuse = value;
+                          _reuseTagId = null;
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
               ),
               const SizedBox(height: 8),
             ],

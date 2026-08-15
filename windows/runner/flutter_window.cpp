@@ -35,10 +35,14 @@ constexpr DWORD kFloatingDropTargetGlowPeriodMs = 900;
 constexpr LONG kFloatingDropTargetDragThreshold = 4;
 constexpr int kFloatingDropTargetProximityMargin = 64;
 constexpr LONG kFloatingDropTargetEdgeSlack = 6;
+// Drag must stop within this distance of a left/right work-area edge for the
+// ball to snap; otherwise it stays where it was released.
+constexpr LONG kFloatingDropTargetSnapThreshold = 48;
 
 struct FloatingDropTargetHookState {
   HWND window = nullptr;
   bool active = false;
+  bool button_down = false;
 };
 
 FloatingDropTargetHookState g_floating_drop_target_hook;
@@ -53,12 +57,19 @@ LRESULT CALLBACK FloatingDropTargetProximityProc(int code, WPARAM wparam,
       (wparam == WM_MOUSEMOVE || wparam == WM_LBUTTONDOWN ||
        wparam == WM_LBUTTONUP)) {
     const auto& info = *reinterpret_cast<const MSLLHOOKSTRUCT*>(lparam);
+    // Track the button ourselves: reading its state mid-hook is unreliable
+    // for injected input, while the hook always sees every down/up event.
+    if (wparam == WM_LBUTTONDOWN) {
+      g_floating_drop_target_hook.button_down = true;
+    } else if (wparam == WM_LBUTTONUP) {
+      g_floating_drop_target_hook.button_down = false;
+    }
     RECT rect{};
     GetWindowRect(g_floating_drop_target_hook.window, &rect);
     InflateRect(&rect, kFloatingDropTargetProximityMargin,
                 kFloatingDropTargetProximityMargin);
-    const bool active =
-        PtInRect(&rect, info.pt) != FALSE && GetKeyState(VK_LBUTTON) < 0;
+    const bool active = PtInRect(&rect, info.pt) != FALSE &&
+                        g_floating_drop_target_hook.button_down;
     if (active != g_floating_drop_target_hook.active) {
       g_floating_drop_target_hook.active = active;
       PostMessage(g_floating_drop_target_hook.window,
@@ -660,10 +671,10 @@ void FlutterWindow::ApplyFloatingDropTargetPosition() {
   LONG left = cx - size / 2;
   if (cx <= min_cx + kFloatingDropTargetEdgeSlack) {
     snap = FloatingTargetSnap::kLeft;
-    left = work.left - size / 3;
+    left = work.left - size * 2 / 3;
   } else if (cx >= max_cx - kFloatingDropTargetEdgeSlack) {
     snap = FloatingTargetSnap::kRight;
-    left = work.right - size * 2 / 3;
+    left = work.right - size / 3;
   }
   floating_drop_target_snap_ = snap;
   floating_drop_target_expanded_ = false;
@@ -671,8 +682,9 @@ void FlutterWindow::ApplyFloatingDropTargetPosition() {
                SWP_NOACTIVATE);
 }
 
-// Starts the edge snap after a drag: slide to the nearest work-area edge and
-// dock the ball roughly one third visible.
+// Starts the edge snap after a drag, but only when the drag stopped near a
+// left/right work-area edge; otherwise the ball stays where it was released
+// and simply persists the free position.
 void FlutterWindow::BeginFloatingDropTargetSnap() {
   const HWND window = floating_drop_target_window_;
   if (window == nullptr) {
@@ -686,9 +698,18 @@ void FlutterWindow::BeginFloatingDropTargetSnap() {
   const RECT work = monitor_info.rcWork;
   const int size = kFloatingDropTargetSize;
   const LONG center_x = rect.left + size / 2;
-  const bool dock_left = center_x * 2 < work.left + work.right;
+  const bool near_left = center_x <= work.left + kFloatingDropTargetSnapThreshold;
+  const bool near_right =
+      center_x >= work.right - kFloatingDropTargetSnapThreshold;
+  if (!near_left && !near_right) {
+    floating_drop_target_snap_ = FloatingTargetSnap::kNone;
+    floating_drop_target_expanded_ = false;
+    ReportFloatingDropTargetPosition();
+    return;
+  }
+  const bool dock_left = near_left;
   POINT target{};
-  target.x = dock_left ? work.left - size / 3 : work.right - size * 2 / 3;
+  target.x = dock_left ? work.left - size * 2 / 3 : work.right - size / 3;
   target.y = rect.top < work.top
                  ? work.top
                  : (rect.top > work.bottom - size ? work.bottom - size
@@ -725,6 +746,10 @@ void FlutterWindow::CompleteFloatingDropTargetSlide() {
   }
   floating_drop_target_slide_finalize_ = false;
   floating_drop_target_snap_ = floating_drop_target_slide_snap_;
+  ReportFloatingDropTargetPosition();
+}
+
+void FlutterWindow::ReportFloatingDropTargetPosition() {
   const HWND window = floating_drop_target_window_;
   if (window == nullptr || floating_drop_target_channel_ == nullptr) {
     return;
@@ -786,8 +811,8 @@ void FlutterWindow::UpdateFloatingDropTargetExpansion() {
                    : work.right - size;
   } else {
     target.x = floating_drop_target_snap_ == FloatingTargetSnap::kLeft
-                   ? work.left - size / 3
-                   : work.right - size * 2 / 3;
+                   ? work.left - size * 2 / 3
+                   : work.right - size / 3;
   }
   BeginFloatingDropTargetSlide(target, false, floating_drop_target_snap_);
 }

@@ -6,7 +6,7 @@
 - 拖动：WM_LBUTTONDOWN 捕获并记录光标-窗口偏移，超过 4px 才进入拖动（未拖动松开仍激活 Quick Tag）；释放后按当前显示器工作区吸附最近左右边缘，16ms 定时器 ease-out cubic 滑入约三分之一可见的停靠态。
 - 悬停经 TrackMouseEvent/WM_MOUSELEAVE 驱动停靠球滑出/滑回；WH_MOUSE_LL 钩子只做膨胀矩形命中 + VK_LBUTTON 检查并 PostMessage 状态变化，按住左键靠近时 55ms 定时器以 0.35-0.75 alpha 脉动重绘"logo + 软光环"分层像素（文件拖动无法全局识别，近似为"左键按住靠近"，代码注释已说明）。
 - 位置持久化：`UserPreferences` 新增可空 `floatingTargetX/Y`（容错解析，版本仍为 1）；原生拖动结束回调 `savePosition`（逻辑完全可见中心），启用时 Dart 经 `setPosition` 恢复并在贴边 6px 内还原停靠；位置写入不进入设置日志。
-- 验证：`analyze --no-pub` 0 问题；全量测试 129/129 通过（新增通道回传、偏好容错回写、位置变更不写日志共 4 项）；`flutter_window.cpp` 在 /W4 /WX 下编译通过。Release 链接被会话前启动且窗口可见的既有 tagtag.exe（PID 18648）占用失败（LNK1104），该实例同时持有单实例 Mutex；真机验证脚本已就绪（`.scratch/floating-target-interaction/verify_floating_target.py`），待既有实例退出后重跑构建与脚本补齐证据，任务卡 01/02 暂保持 claimed。
+- 验证：`analyze --no-pub` 0 问题；全量测试 129/129 通过（新增通道回传、偏好容错回写、位置变更不写日志共 4 项）；`flutter_window.cpp` 在 /W4 /WX 下编译通过。Release 构建首次被会话前启动的既有 tagtag.exe（PID 18648）占用输出而 LNK1104，其退出后重试成功。复核发现 spec 结构节吸附公式与需求文字矛盾，按"roughly one third visible"修正为约 1/3 可见停靠（修正后 analyze/测试仍为 GREEN，编译通过）。真机人工捕获未执行：12:40 起另一 tagtag.exe（PID 11716，非本任务启动、窗口可见）持续持有单实例 Mutex 并锁定 Release 输出超过 55 分钟，三次守候未等到空闲窗口，按约定不予结束；自检式验证脚本已就绪（`.scratch/floating-target-interaction/verify_floating_target.py`，可重复运行、仅结束自己拉起的实例），待机器空闲时重建并执行即可补齐截图证据，任务卡 01/02 暂保持 claimed。
 
 ## 会话：2026-08-10（SQLite 标签元数据统一）
 
@@ -584,3 +584,13 @@
 - 修复深色模式下 Quick Tag 等对话框仍为浅色的问题：对话框挂在根 Navigator，捕获不到 home_screen 的 Theme 覆盖；showPrototypeDialog 现在捕获调用方主题，home_screen 通过 Builder 记录 Theme 覆盖下的 _dialogContext 作为对话框调用起点，两个原生 showDialog 调用同步包装。新增深色对话框回归测试。
 - 确认“归档”标签来自测试/使用数据（种子库创建时间 2026-08-13），TAGTAG 不创建系统默认标签，无需特殊处理。
 - 最终门禁：静态分析 0 问题，全量测试 119/119，Windows Release 构建成功。
+
+## 会话：2026-08-15（悬浮球交互收尾与第二轮反馈）
+
+- 悬浮球吸附逻辑按用户反馈修正：松手位置距左/右边缘 48px 以内才吸附，否则留在原地（自由位置同样持久化）。
+- 开关重做：新增全局 PillSwitch（玻璃胶囊开关），轨道颜色过渡 + 滑钮移动 + 悬停/聚焦整条轨道反馈，聚焦描边贴合椭圆，替换快速标注、设置、新建标签对话框中的全部 Material Switch，消除脱离的圆形聚焦指示器。
+- 悬浮球接近检测可靠性修复：WH_MOUSE_LL 钩子在注入输入下读取按键状态不可靠，改为钩子内自行跟踪 WM_LBUTTONDOWN/UP 状态；实机验证脚本同步更新（中段不吸附、近边才吸附、重启恢复前先把光标移开避免悬停展开误判）。
+- 悬浮球实机验证全部通过：自由态/接近光圈/中段停留/近边吸附/悬停展开/吸附态光圈展开/点击 Quick Tag/拖放导入/重启恢复吸附位，8 张截图存于 build/parity-shots/floating-target/。
+- 唯一标签策略完成：TagNamePolicy（inherit/unique/free）+ 全局“标签名称全局唯一”偏好 + 创建重名守卫 + 策略菜单 + 树节点同名徽标；领域与 UI 测试全过。
+- 展开层级控件改为滑杆对话框（含仅顶层/全部展开）；tooltip 深色对比修复。
+- 最终门禁：静态分析 0 问题，全量测试 129/129，Windows Release 构建成功。

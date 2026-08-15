@@ -48,6 +48,8 @@ class FlutterWindow : public Win32Window {
   bool CreateFloatingDropTarget();
   void DestroyFloatingDropTarget();
   void ShowFloatingDropTarget();
+  void UpdateFloatingDropTargetPixels();
+  void ReportFloatingDropTargetPosition();
   void UpdateFloatingDropTargetPixels(int glow_alpha = 0);
   void ApplyFloatingDropTargetPosition();
   void BeginFloatingDropTargetSnap();

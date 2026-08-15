@@ -215,7 +215,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
                       ],
                     ),
                   ),
-                  Switch(
+                  PillSwitch(
                     value: canInherit && _inheritChildren,
                     onChanged: canInherit
                         ? (value) => setState(() => _inheritChildren = value)
@@ -1111,7 +1111,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
       title: '标签名称全局唯一',
       subtitle: '同名标签默认唯一；仍可在标签操作中单独豁免',
       compact: compact,
-      trailing: Switch(
+      trailing: PillSwitch(
         value: _uniqueTagNames,
         onChanged: (value) => setState(() => _uniqueTagNames = value),
       ),
@@ -1214,7 +1214,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
       title: '悬浮接收目标',
       subtitle: '将资源拖到悬浮目标开始导入',
       compact: compact,
-      trailing: Switch(
+      trailing: PillSwitch(
         value: _floatingDropTargetEnabled,
         onChanged: (value) =>
             setState(() => _floatingDropTargetEnabled = value),

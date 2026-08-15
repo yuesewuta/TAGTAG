@@ -19,7 +19,10 @@ void main() {
       name: '参考',
       colorValue: 0,
     );
-    expect(controller.state.placementById(placementId).tagId, isNot('tag-reference-shared'));
+    expect(
+      controller.state.placementById(placementId).tagId,
+      isNot('tag-reference-shared'),
+    );
   });
 
   test('global unique setting blocks same-name creation', () async {
@@ -45,20 +48,23 @@ void main() {
     );
   });
 
-  test('per-tag unique policy blocks duplicates with the global setting off', () async {
-    final fixture = await _fixture();
-    addTearDown(fixture.dispose);
-    final controller = fixture.controller;
+  test(
+    'per-tag unique policy blocks duplicates with the global setting off',
+    () async {
+      final fixture = await _fixture();
+      addTearDown(fixture.dispose);
+      final controller = fixture.controller;
 
-    await controller.setTagNamePolicy('tag-design', TagNamePolicy.unique);
-    expect(controller.tagNamePolicyOf('tag-design'), TagNamePolicy.unique);
-    expect(
-      () => controller.createPlacement(name: '设计', colorValue: 0),
-      throwsA(isA<StateError>()),
-    );
-    // Non-unique names still work.
-    await controller.createPlacement(name: '全新标签', colorValue: 0);
-  });
+      await controller.setTagNamePolicy('tag-design', TagNamePolicy.unique);
+      expect(controller.tagNamePolicyOf('tag-design'), TagNamePolicy.unique);
+      expect(
+        () => controller.createPlacement(name: '设计', colorValue: 0),
+        throwsA(isA<StateError>()),
+      );
+      // Non-unique names still work.
+      await controller.createPlacement(name: '全新标签', colorValue: 0);
+    },
+  );
 
   test('free policy exempts a tag while the global setting is on', () async {
     final fixture = await _fixture();
@@ -98,8 +104,10 @@ void main() {
   });
 }
 
-Future<({TagTagController controller, LocalStore store, void Function() dispose})>
-    _fixture() async {
+Future<
+  ({TagTagController controller, LocalStore store, void Function() dispose})
+>
+_fixture() async {
   final directory = await Directory.systemTemp.createTemp('tagtag-unique-');
   final store = LocalStore(baseDirectory: directory);
   await store.save(AppState.demo());

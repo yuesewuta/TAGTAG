@@ -11,6 +11,7 @@ import 'package:tagtag/platform/windows_quick_tag_hotkey.dart';
 import 'package:tagtag/state/tagtag_controller.dart';
 import 'package:tagtag/storage/library_locator.dart';
 import 'package:tagtag/storage/managed_library.dart';
+import 'package:tagtag/ui/glass.dart';
 import 'package:tagtag/ui/home_screen.dart';
 
 void main() {
@@ -209,7 +210,7 @@ void main() {
 
     // The dialog exposes the folder's current inheritance rule.
     expect(find.text('子项继承'), findsOneWidget);
-    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+    expect(tester.widget<PillSwitch>(find.byType(PillSwitch)).value, isTrue);
     expect(find.text('添加 1 个标签'), findsOneWidget);
     expect(tester.takeException(), isNull);
 

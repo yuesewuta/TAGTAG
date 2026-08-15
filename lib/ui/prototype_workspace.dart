@@ -2963,7 +2963,9 @@ class _TagResultPanel extends StatelessWidget {
                     case _TagMenuAction.policyFree:
                       unawaited(_setPolicy(context, tag, TagNamePolicy.free));
                     case _TagMenuAction.policyInherit:
-                      unawaited(_setPolicy(context, tag, TagNamePolicy.inherit));
+                      unawaited(
+                        _setPolicy(context, tag, TagNamePolicy.inherit),
+                      );
                     case _TagMenuAction.merge:
                       unawaited(onMergeTag(item.id));
                     case _TagMenuAction.split:
@@ -3001,12 +3003,14 @@ class _TagResultPanel extends StatelessWidget {
                       controller.isPlacementHidden(item.id) ? '取消隐藏' : '从常用隐藏',
                     ),
                   ),
-                  if (controller.tagNamePolicyOf(tag.id) == TagNamePolicy.unique)
+                  if (controller.tagNamePolicyOf(tag.id) ==
+                      TagNamePolicy.unique)
                     const PopupMenuItem(
                       value: _TagMenuAction.policyInherit,
                       child: Text('取消唯一标记'),
                     )
-                  else if (controller.tagNamePolicyOf(tag.id) == TagNamePolicy.free)
+                  else if (controller.tagNamePolicyOf(tag.id) ==
+                      TagNamePolicy.free)
                     const PopupMenuItem(
                       value: _TagMenuAction.policyInherit,
                       child: Text('移除同名例外'),
@@ -3166,9 +3170,9 @@ class _TagResultPanel extends StatelessWidget {
     try {
       await controller.setTagNamePolicy(tag.id, policy);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已更新“${tag.name}”的同名策略')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('已更新“${tag.name}”的同名策略')));
       }
     } catch (error) {
       if (context.mounted) {

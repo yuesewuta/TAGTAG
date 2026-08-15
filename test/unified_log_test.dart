@@ -42,10 +42,7 @@ void main() {
     // A real settings change right after still logs exactly one entry.
     await controller.updatePreferences(closeToTray: false);
     expect(controller.state.logEvents, hasLength(1));
-    expect(
-      controller.state.logEvents.single.summary,
-      contains('关闭主窗口时 退出'),
-    );
+    expect(controller.state.logEvents.single.summary, contains('关闭主窗口时 退出'));
   });
 
   test('tag lifecycle actions are recorded as tag log operations', () async {

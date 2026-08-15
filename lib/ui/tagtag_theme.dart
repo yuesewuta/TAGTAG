@@ -132,20 +132,6 @@ ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
       ),
       textStyle: const TextStyle(color: Colors.white, fontSize: 12),
     ),
-    // Keep switch focus feedback on the track itself instead of Material's
-    // detached thumb ring.
-    switchTheme: SwitchThemeData(
-      overlayColor: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.focused)
-            ? primary.withValues(alpha: 0.10)
-            : Colors.transparent,
-      ),
-      trackOutlineColor: WidgetStateProperty.resolveWith(
-        (states) => states.contains(WidgetState.focused)
-            ? primary
-            : Colors.transparent,
-      ),
-    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: surface,

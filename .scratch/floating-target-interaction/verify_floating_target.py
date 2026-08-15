@@ -3,7 +3,7 @@
 # Launches an isolated TAGTAG instance with APPDATA pointed at the UI test
 # seed, then drives the floating ball with synthesized input:
 #   1. free-state screenshot
-#   2. drag to mid screen, release -> edge snap (half-off-screen docking)
+#   2. drag to mid screen -> stays; drag near an edge -> snap (docks ~2/3 off-screen)
 #   3. hover a snapped ball -> slides fully out
 #   4. left button held near the ball -> proximity glow (both states)
 #   5. click (no drag) -> Quick Tag activation (main window + file picker)
@@ -97,7 +97,11 @@ def screenshot(rect, name):
                  SRCCOPY | CAPTUREBLT)
     stride = width * 4
     buffer = (ctypes.c_byte * (stride * height))()
-    gdi32.GetBitmapBits(bitmap, len(buffer), buffer)
+    # Negative height asks GetDIBits for top-down rows.
+    bmi = struct.pack("<IiiHHIIiiII", 40, width, -height, 1, 32, 0,
+                      0, 0, 0, 0, 0)
+    gdi32.GetDIBits(memory_dc, bitmap, 0, height, buffer,
+                    ctypes.create_string_buffer(bmi, len(bmi)), 0)
     gdi32.DeleteObject(bitmap)
     gdi32.DeleteDC(memory_dc)
     user32.ReleaseDC(None, screen_dc)
@@ -176,6 +180,31 @@ def post_drop_files(hwnd, paths):
         fail("PostMessage WM_DROPFILES failed")
 
 
+def reset_seed_position():
+    # A previous run persists floatingTargetX/Y into the seed library; clear
+    # them so every run starts from the free default corner.
+    import json
+    import sqlite3
+
+    db_path = os.path.join(ROOT, r"build\ui-test-library\.tagtag\tagtag.sqlite")
+    db = sqlite3.connect(db_path)
+    try:
+        row = db.execute(
+            "select value from metadata where key='preferences_json'"
+        ).fetchone()
+        if row:
+            prefs = json.loads(row[0])
+            prefs.pop("floatingTargetX", None)
+            prefs.pop("floatingTargetY", None)
+            db.execute(
+                "update metadata set value=? where key='preferences_json'",
+                (json.dumps(prefs, separators=(",", ":")),),
+            )
+            db.commit()
+    finally:
+        db.close()
+
+
 def main():
     os.makedirs(SHOT_DIR, exist_ok=True)
     preexisting = running_tagtag_pids()
@@ -186,10 +215,17 @@ def main():
 
     work_left, work_top, work_right, work_bottom = work_area()
     print(f"work area: ({work_left},{work_top})-({work_right},{work_bottom})")
+    reset_seed_position()
 
     # --- session 1: free state, drag, snap, hover, glow, click, drop ---
     process, ball = launch_instance()
     try:
+        # Hide the main window so stray synthetic clicks land on the desktop;
+        # the Quick Tag click test later verifies it comes back.
+        main = find_window(MAIN_CLASS, MAIN_TITLE, attempts=20)
+        if main:
+            user32.ShowWindow(main, 0)  # SW_HIDE
+            time.sleep(0.3)
         rect = window_rect(ball)
         print("free-state rect:", rect)
         shot_ball(ball, "01-free-state.bmp")
@@ -206,7 +242,8 @@ def main():
         left_up()
         time.sleep(0.4)
 
-        # Drag the ball to the middle-left of the screen, then release.
+        # Drag the ball to the middle of the screen: it must stay put (no
+        # snap unless released near an edge).
         move_to(free_cx, free_cy)
         left_down()
         move_to((work_left + work_right) // 3, (work_top + work_bottom) // 2,
@@ -214,17 +251,33 @@ def main():
         left_up()
         time.sleep(0.8)
         rect = window_rect(ball)
+        mid_left = (work_left + work_right) // 3
+        if not (mid_left - 80 < rect[0] < mid_left + 80):
+            fail("ball snapped although released away from any edge")
+        shot_ball(ball, "03-free-after-mid-drag.bmp")
+
+        # Drag from the middle to just inside the right edge, then release:
+        # the ball must dock half off-screen.
+        mid_cx = (rect[0] + rect[2]) // 2
+        mid_cy = (rect[1] + rect[3]) // 2
+        move_to(mid_cx, mid_cy)
+        left_down()
+        move_to(work_right - 30, mid_cy, steps=15)
+        left_up()
+        time.sleep(0.8)
+        rect = window_rect(ball)
         snapped_left = rect[0] < work_left
         snapped_right = rect[2] > work_right
         print("after snap:", rect, "snapped:", snapped_left or snapped_right)
         if not (snapped_left or snapped_right):
-            fail("ball did not dock half off-screen after release")
+            fail("ball did not dock off-screen after release")
         shot_ball(ball, "03-snapped-docked.bmp")
 
-        # Hover the docked ball: it must slide fully out.
-        cx = (rect[0] + rect[2]) // 2
+        # Hover the docked ball on its visible sliver: it must slide fully
+        # out. The docked center is off-screen, so aim inside the sliver.
         cy = (rect[1] + rect[3]) // 2
-        move_to(cx, cy)
+        hover_x = work_left + 8 if rect[0] < work_left else work_right - 8
+        move_to(hover_x, cy)
         time.sleep(0.6)
         expanded = window_rect(ball)
         is_expanded = expanded[0] >= work_left and expanded[2] <= work_right
@@ -242,12 +295,10 @@ def main():
             fail("ball did not slide back after hover leave")
 
         # Proximity glow in the snapped state: hold the button nearby.
-        cx = (docked[0] + docked[2]) // 2
+        # 60px from the edge is outside the visible sliver (~21px) but well
+        # inside the +64px inflated proximity rect.
         cy = (docked[1] + docked[3]) // 2
-        move_to(cx, cy)
-        move_to((work_left + work_right) // 2, (work_top + work_bottom) // 2)
-        near_x = max(work_left, docked[0]) + BALL + 20 if docked[0] < work_left \
-            else min(work_right, docked[2]) - BALL - 20
+        near_x = work_left + 60 if docked[0] < work_left else work_right - 60
         move_to(near_x, cy)
         left_down()
         move_to(near_x + 3, cy + 3)
@@ -260,18 +311,20 @@ def main():
         left_up()
         time.sleep(0.5)
 
-        # Click (no drag) activates Quick Tag; with no selection the app
-        # opens its file picker. Close that dialog with IDCANCEL.
+        # Click (no drag) on the visible sliver activates Quick Tag; with no
+        # selection the app opens its file picker. Close it with IDCANCEL.
         docked = window_rect(ball)
-        cx = (docked[0] + docked[2]) // 2
         cy = (docked[1] + docked[3]) // 2
-        move_to(cx, cy)
+        click_x = work_left + 8 if docked[0] < work_left else work_right - 8
+        move_to(click_x, cy)
         left_down()
         left_up()
         dialog = find_window("#32770", None, attempts=40)
         main = find_window(MAIN_CLASS, MAIN_TITLE, attempts=10)
-        print("quick tag main window:", main, "picker dialog:", dialog)
-        if not main:
+        main_visible = bool(user32.IsWindowVisible(main)) if main else False
+        print("quick tag main window:", main, "visible:", main_visible,
+              "picker dialog:", dialog)
+        if not main or not main_visible:
             fail("click did not surface the main window")
         shot = window_rect(dialog) if dialog else window_rect(main)
         screenshot(shot, "06-click-quick-tag.bmp")
@@ -295,6 +348,10 @@ def main():
     # --- session 2: the docked position survives a restart ---
     process, ball = launch_instance()
     try:
+        # The cursor rests where session 1 left it (over the dock sliver),
+        # which legitimately hover-expands the ball; move it away first.
+        move_to((work_left + work_right) // 2, (work_top + work_bottom) // 2)
+        time.sleep(0.8)
         restored = window_rect(ball)
         print("restored rect:", restored)
         if not (restored[0] < work_left or restored[2] > work_right):

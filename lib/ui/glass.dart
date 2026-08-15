@@ -247,17 +247,117 @@ class GlassPrimaryButton extends StatelessWidget {
               ],
       ),
       child: icon == null
-          ? FilledButton(
-              onPressed: onPressed,
-              style: style,
-              child: child,
-            )
+          ? FilledButton(onPressed: onPressed, style: style, child: child)
           : FilledButton.icon(
               onPressed: onPressed,
               style: style,
               icon: icon!,
               label: child,
             ),
+    );
+  }
+}
+
+/// A pill-shaped toggle used app-wide instead of Material's [Switch].
+/// Interaction feedback animates the whole capsule (track color, sliding
+/// knob, focus outline hugging the pill) — no detached thumb ring.
+class PillSwitch extends StatefulWidget {
+  const PillSwitch({super.key, required this.value, required this.onChanged});
+
+  final bool value;
+
+  /// Null disables the switch.
+  final ValueChanged<bool>? onChanged;
+
+  @override
+  State<PillSwitch> createState() => _PillSwitchState();
+}
+
+class _PillSwitchState extends State<PillSwitch> {
+  bool _focused = false;
+  bool _hovered = false;
+
+  void _toggle() => widget.onChanged?.call(!widget.value);
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final enabled = widget.onChanged != null;
+    final duration = MediaQuery.of(context).disableAnimations
+        ? Duration.zero
+        : const Duration(milliseconds: 160);
+    var trackColor = !enabled
+        ? scheme.onSurface.withValues(alpha: 0.10)
+        : widget.value
+        ? scheme.primary
+        : scheme.onSurface.withValues(alpha: 0.22);
+    if (enabled && (_hovered || _focused)) {
+      trackColor = Color.alphaBlend(
+        scheme.primary.withValues(alpha: widget.value ? 0.06 : 0.10),
+        trackColor,
+      );
+    }
+    return Semantics(
+      toggled: widget.value,
+      enabled: enabled,
+      child: FocusableActionDetector(
+        enabled: enabled,
+        onShowFocusHighlight: (value) => setState(() => _focused = value),
+        onShowHoverHighlight: (value) => setState(() => _hovered = value),
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              _toggle();
+              return null;
+            },
+          ),
+        },
+        mouseCursor: enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        child: GestureDetector(
+          onTap: enabled ? _toggle : null,
+          child: AnimatedContainer(
+            duration: duration,
+            curve: Curves.easeOutCubic,
+            width: 44,
+            height: 26,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: trackColor,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: _focused && enabled
+                    ? scheme.primary
+                    : Colors.transparent,
+                width: 2,
+              ),
+            ),
+            child: AnimatedAlign(
+              duration: duration,
+              curve: Curves.easeOutCubic,
+              alignment: widget.value
+                  ? Alignment.centerRight
+                  : Alignment.centerLeft,
+              child: Container(
+                width: 18,
+                height: 18,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(9),
+                  boxShadow: const [
+                    BoxShadow(
+                      blurRadius: 3,
+                      offset: Offset(0, 1),
+                      color: Color(0x33000000),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
