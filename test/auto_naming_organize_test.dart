@@ -193,35 +193,56 @@ void main() {
       expect(fixture.controller.state.resources.single.name, 'note-1.txt');
     });
 
-    test('renamed imports still never overwrite existing targets', () async {
-      final fixture = await _createLibraryFixture();
-      addTearDown(fixture.dispose);
-      final first = File('${fixture.sandbox.path}/external/a.txt');
-      await first.create(recursive: true);
-      await first.writeAsString('a');
-      final second = File('${fixture.sandbox.path}/external/b.txt');
-      await second.writeAsString('b');
+    test(
+      'renamed imports auto-rename on conflicts instead of overwriting',
+      () async {
+        final fixture = await _createLibraryFixture();
+        addTearDown(fixture.dispose);
+        final first = File('${fixture.sandbox.path}/external/a.txt');
+        await first.create(recursive: true);
+        await first.writeAsString('a');
+        final second = File('${fixture.sandbox.path}/external/b.txt');
+        await second.writeAsString('b');
 
-      await fixture.controller.importManagedResource(
-        source: first,
-        targetDirectory: 'inbox',
-        targetName: 'same.txt',
-      );
-      expect(
-        () => fixture.controller.importManagedResource(
+        await fixture.controller.importManagedResource(
+          source: first,
+          targetDirectory: 'inbox',
+          targetName: 'same.txt',
+        );
+        final renamed = await fixture.controller.importManagedResource(
           source: second,
           targetDirectory: 'inbox',
           targetName: 'same.txt',
-        ),
-        throwsA(isA<FileSystemException>()),
-      );
-      expect(
-        await File(
-          '${fixture.library.root.path}/inbox/same.txt',
-        ).readAsString(),
-        'a',
-      );
-    });
+        );
+
+        final now = DateTime.now();
+        final dateLabel =
+            '${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+        // Untagged conflicts differentiate with the MM-DD date suffix.
+        expect(renamed.name, 'same-$dateLabel.txt');
+        expect(
+          renamed.path.replaceAll('\\', '/'),
+          endsWith('inbox/same-$dateLabel.txt'),
+        );
+        // The original target keeps its bytes; the new resource carries the
+        // second source's bytes under the suffixed name.
+        expect(
+          await File(
+            '${fixture.library.root.path}/inbox/same.txt',
+          ).readAsString(),
+          'a',
+        );
+        expect(
+          await File(
+            '${fixture.library.root.path}/inbox/same-$dateLabel.txt',
+          ).readAsString(),
+          'b',
+        );
+        expect(await first.readAsString(), 'a');
+        expect(await second.readAsString(), 'b');
+        expect(fixture.controller.state.resources, hasLength(2));
+      },
+    );
 
     test('library importResource validates the target name', () async {
       final fixture = await _createLibraryFixture();
@@ -665,6 +686,73 @@ void main() {
       await tester.tap(find.text('复制并导入'));
       await tester.pumpAndSettle();
       expect(result!.renamedSources, isEmpty);
+      expect(tester.takeException(), isNull);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('import dialog annotates sources that will auto-rename', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1440, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final fixture = await _createWidgetLibraryFixture(tester);
+      addTearDown(() async {
+        try {
+          await fixture.sandbox.delete(recursive: true);
+        } on PathAccessException {
+          // Windows may briefly keep persisted files locked.
+        }
+      });
+      await tester.runAsync(() async {
+        // The dialog targets the storage root by default, so the conflicting
+        // managed resource lives there too.
+        final managed = File('${fixture.sandbox.path}/managed/alpha.txt');
+        await managed.create(recursive: true);
+        await managed.writeAsString('managed bytes');
+        await fixture.controller.importManagedResource(
+          source: managed,
+          targetDirectory: '',
+        );
+        final incoming = File('${fixture.sandbox.path}/incoming/alpha.txt');
+        await incoming.create(recursive: true);
+        await incoming.writeAsString('incoming bytes');
+      });
+      final sources = [File('${fixture.sandbox.path}/incoming/alpha.txt')];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildTagTagTheme(),
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: TextButton(
+                onPressed: () async {
+                  await showPrototypeDialog<PrototypeImportResult>(
+                    context: context,
+                    builder: (context) => PrototypeImportDialog(
+                      controller: fixture.controller,
+                      sources: sources,
+                      initialMode: ImportMode.copy,
+                    ),
+                  );
+                },
+                child: const Text('open-import'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open-import'));
+      await tester.pumpAndSettle();
+
+      // The per-source annotation resolves through real file IO; alternate
+      // real delays with pumps until the resolved name renders.
+      await _settleRealAsync(tester, find.textContaining('→ alpha-'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('→ alpha-'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());

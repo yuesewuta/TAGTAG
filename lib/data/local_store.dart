@@ -8,6 +8,7 @@ class UserPreferences {
     this.moveImportsByDefault = false,
     this.floatingDropTargetEnabled = false,
     this.closeToTray = true,
+    this.autoStartEnabled = false,
     this.startupView = 'last',
     this.appearanceTheme = 'light',
     this.interfaceDensity = 'compact',
@@ -21,6 +22,9 @@ class UserPreferences {
   final bool moveImportsByDefault;
   final bool floatingDropTargetEnabled;
   final bool closeToTray;
+
+  /// Launch TAGTAG automatically when the user logs into Windows.
+  final bool autoStartEnabled;
   final String startupView;
   final String appearanceTheme;
   final String interfaceDensity;
@@ -43,6 +47,7 @@ class UserPreferences {
     bool? moveImportsByDefault,
     bool? floatingDropTargetEnabled,
     bool? closeToTray,
+    bool? autoStartEnabled,
     String? startupView,
     String? appearanceTheme,
     String? interfaceDensity,
@@ -56,6 +61,7 @@ class UserPreferences {
     floatingDropTargetEnabled:
         floatingDropTargetEnabled ?? this.floatingDropTargetEnabled,
     closeToTray: closeToTray ?? this.closeToTray,
+    autoStartEnabled: autoStartEnabled ?? this.autoStartEnabled,
     startupView: startupView ?? this.startupView,
     appearanceTheme: appearanceTheme ?? this.appearanceTheme,
     interfaceDensity: interfaceDensity ?? this.interfaceDensity,
@@ -71,6 +77,7 @@ class UserPreferences {
     'moveImportsByDefault': moveImportsByDefault,
     'floatingDropTargetEnabled': floatingDropTargetEnabled,
     'closeToTray': closeToTray,
+    'autoStartEnabled': autoStartEnabled,
     'startupView': startupView,
     'appearanceTheme': appearanceTheme,
     'interfaceDensity': interfaceDensity,
@@ -84,6 +91,7 @@ class UserPreferences {
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
     final floatingDropTargetEnabled = json['floatingDropTargetEnabled'];
     final closeToTray = json['closeToTray'];
+    final autoStartEnabled = json['autoStartEnabled'];
     final startupView = json['startupView'];
     final appearanceTheme = json['appearanceTheme'];
     final interfaceDensity = json['interfaceDensity'];
@@ -95,6 +103,7 @@ class UserPreferences {
         (floatingDropTargetEnabled != null &&
             floatingDropTargetEnabled is! bool) ||
         (closeToTray != null && closeToTray is! bool) ||
+        (autoStartEnabled != null && autoStartEnabled is! bool) ||
         (startupView != null || startupView is String) &&
             !const {'last', 'all', 'inbox'}.contains(startupView) ||
         (appearanceTheme != null || appearanceTheme is String) &&
@@ -112,6 +121,7 @@ class UserPreferences {
       moveImportsByDefault: json['moveImportsByDefault'] as bool,
       floatingDropTargetEnabled: floatingDropTargetEnabled as bool? ?? false,
       closeToTray: closeToTray as bool? ?? true,
+      autoStartEnabled: autoStartEnabled as bool? ?? false,
       startupView: startupView as String? ?? 'last',
       appearanceTheme: appearanceTheme as String? ?? 'light',
       interfaceDensity: interfaceDensity as String? ?? 'compact',

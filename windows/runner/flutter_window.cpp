@@ -39,6 +39,11 @@ constexpr LONG kFloatingDropTargetEdgeSlack = 6;
 // ball to snap; otherwise it stays where it was released.
 constexpr LONG kFloatingDropTargetSnapThreshold = 48;
 
+// Per-user Run key backing the "launch at Windows startup" setting.
+constexpr wchar_t kAutoStartRunKey[] =
+    L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+constexpr wchar_t kAutoStartValueName[] = L"TAGTAG";
+
 struct FloatingDropTargetHookState {
   HWND window = nullptr;
   bool active = false;
@@ -335,6 +340,20 @@ bool FlutterWindow::OnCreate() {
           result->Success(flutter::EncodableValue(close_to_tray_));
           return;
         }
+        if (call.method_name() == "setAutoStart") {
+          const auto* enabled = std::get_if<bool>(call.arguments());
+          if (enabled == nullptr) {
+            result->Error("invalid_arguments",
+                          "Auto start requires a bool value");
+            return;
+          }
+          result->Success(flutter::EncodableValue(SetAutoStart(*enabled)));
+          return;
+        }
+        if (call.method_name() == "isAutoStart") {
+          result->Success(flutter::EncodableValue(IsAutoStart()));
+          return;
+        }
         result->NotImplemented();
       });
   quick_tag_registered_ =
@@ -398,6 +417,49 @@ bool FlutterWindow::SetQuickTagShortcut(UINT modifiers, UINT virtual_key) {
                      previous_virtual_key) != FALSE;
   quick_tag_window_ = quick_tag_registered_ ? window : nullptr;
   return false;
+}
+
+bool FlutterWindow::SetAutoStart(bool enabled) {
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, kAutoStartRunKey, 0, KEY_SET_VALUE,
+                    &key) != ERROR_SUCCESS) {
+    return false;
+  }
+  LSTATUS status = ERROR_SUCCESS;
+  if (enabled) {
+    wchar_t exe_path[MAX_PATH];
+    const DWORD length = GetModuleFileNameW(nullptr, exe_path, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) {
+      RegCloseKey(key);
+      return false;
+    }
+    const std::wstring quoted = L"\"" + std::wstring(exe_path, length) + L"\"";
+    status = RegSetValueExW(
+        key, kAutoStartValueName, 0, REG_SZ,
+        reinterpret_cast<const BYTE*>(quoted.c_str()),
+        static_cast<DWORD>((quoted.size() + 1) * sizeof(wchar_t)));
+  } else {
+    // Deleting a missing value still counts as "disabled".
+    status = RegDeleteValueW(key, kAutoStartValueName);
+    if (status == ERROR_FILE_NOT_FOUND) {
+      status = ERROR_SUCCESS;
+    }
+  }
+  RegCloseKey(key);
+  return status == ERROR_SUCCESS;
+}
+
+bool FlutterWindow::IsAutoStart() const {
+  HKEY key = nullptr;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, kAutoStartRunKey, 0, KEY_QUERY_VALUE,
+                    &key) != ERROR_SUCCESS) {
+    return false;
+  }
+  const LSTATUS status =
+      RegQueryValueExW(key, kAutoStartValueName, nullptr, nullptr, nullptr,
+                       nullptr);
+  RegCloseKey(key);
+  return status == ERROR_SUCCESS;
 }
 
 void FlutterWindow::ShowAndActivate(HWND window) {

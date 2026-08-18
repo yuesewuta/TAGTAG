@@ -65,9 +65,19 @@ class PrototypeQuickTagResult {
 }
 
 class PrototypeQuickTagDialog extends StatefulWidget {
-  const PrototypeQuickTagDialog({super.key, required this.controller});
+  const PrototypeQuickTagDialog({
+    super.key,
+    required this.controller,
+    this.editResourceId,
+  });
 
   final TagTagController controller;
+
+  /// When set, the dialog runs in 修改标签 mode for this resource: its current
+  /// direct placements are pre-checked (instead of the first placement) and
+  /// confirming returns the full desired placement set, so the caller can
+  /// unassign the placements that were toggled off.
+  final String? editResourceId;
 
   @override
   State<PrototypeQuickTagDialog> createState() =>
@@ -79,11 +89,22 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
   final Set<String> _selectedPlacementIds = {};
   bool _inheritChildren = false;
 
+  bool get _isEditMode => widget.editResourceId != null;
+
   @override
   void initState() {
     super.initState();
-    final placements = widget.controller.placementsInActiveSpace;
-    if (placements.isNotEmpty) _selectedPlacementIds.add(placements.first.id);
+    final editResourceId = widget.editResourceId;
+    if (editResourceId != null) {
+      _selectedPlacementIds.addAll(
+        widget.controller
+            .assignmentsForResource(editResourceId)
+            .map((placement) => placement.id),
+      );
+    } else {
+      final placements = widget.controller.placementsInActiveSpace;
+      if (placements.isNotEmpty) _selectedPlacementIds.add(placements.first.id);
+    }
     final folder = widget.controller.selectedFolderForInheritance;
     if (folder != null) {
       _inheritChildren = widget.controller.state.folderTagInheritances.any(
@@ -104,7 +125,9 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
     final allPlacements = widget.controller.placementsInActiveSpace;
     final common = widget.controller.commonPlacements;
     final placements = query.isEmpty
-        ? (common.isEmpty ? allPlacements : common)
+        ? (_isEditMode
+              ? allPlacements
+              : (common.isEmpty ? allPlacements : common))
         : allPlacements.where((placement) {
             final tag = widget.controller.tagForPlacement(placement);
             return '${tag.name} ${widget.controller.pathOf(placement.id)}'
@@ -116,7 +139,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
       width: 560,
       desktopHeight: null,
       icon: Icons.sell_outlined,
-      title: '快速标注',
+      title: _isEditMode ? '修改标签' : '快速标注',
       subtitle:
           '${widget.controller.selectedResourceIds.length} 个资源 · ${widget.controller.activeSpace?.name ?? '标签空间'}',
       body: Column(
@@ -141,7 +164,10 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('常用标签', style: _sectionLabelStyle(context)),
+              child: Text(
+                _isEditMode ? '全部标签' : '常用标签',
+                style: _sectionLabelStyle(context),
+              ),
             ),
           ),
           Flexible(
@@ -240,7 +266,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
           child: const Text('取消'),
         ),
         GlassPrimaryButton.icon(
-          onPressed: _selectedPlacementIds.isEmpty
+          onPressed: _selectedPlacementIds.isEmpty && !_isEditMode
               ? null
               : () => Navigator.pop(
                   context,
@@ -250,7 +276,9 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
                   ),
                 ),
           icon: const Icon(Icons.sell_outlined, size: 17),
-          label: Text('添加 ${_selectedPlacementIds.length} 个标签'),
+          label: Text(
+            _isEditMode ? '保存' : '添加 ${_selectedPlacementIds.length} 个标签',
+          ),
         ),
       ],
     );
@@ -263,6 +291,7 @@ class PrototypeImportResult {
     required this.targetDirectory,
     required this.placementIds,
     required this.renamedSources,
+    required this.sources,
   });
 
   final ImportMode mode;
@@ -273,6 +302,10 @@ class PrototypeImportResult {
   /// base name rendered from the global naming template. Empty when the
   /// batch imports with original names.
   final Map<String, String> renamedSources;
+
+  /// The final source list after in-dialog removals/reselection; the import
+  /// executor must iterate this list, not the originally picked sources.
+  final List<FileSystemEntity> sources;
 }
 
 enum _ImportReselectKind { files, folder }
@@ -302,6 +335,11 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
   String? _targetError;
   bool _renameWithTemplate = true;
 
+  /// Per-source final import names resolved against the target directory
+  /// (same-name conflicts auto-rename to `name (2).ext`); keyed by source
+  /// path and refreshed whenever the sources, tags, mode or target change.
+  Map<String, String> _expectedNames = const {};
+
   String get _namingTemplate => widget.controller.preferences.namingTemplate;
 
   bool get _renameAvailable => _namingTemplate.trim().isNotEmpty;
@@ -317,6 +355,7 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
     super.initState();
     _mode = widget.initialMode;
     _sources = [...widget.sources];
+    unawaited(_refreshExpectedNames());
   }
 
   @override
@@ -356,6 +395,59 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
     };
   }
 
+  /// Sources whose final import name differs from the desired name (target
+  /// directory conflict or an earlier source of the same batch), mapped to
+  /// the resolved name so the rename is never silent.
+  Map<String, String> get _renameAnnotations {
+    final plan = _buildRenamePlan();
+    final annotations = <String, String>{};
+    for (final source in _sources) {
+      final expected = _expectedNames[source.path];
+      if (expected == null) {
+        continue;
+      }
+      final desired = plan[source.path] ?? path.basename(source.path);
+      if (expected != desired) {
+        annotations[source.path] = expected;
+      }
+    }
+    return annotations;
+  }
+
+  /// Resolves each source's final import name through the same library
+  /// helper the real import uses, claiming earlier results so batch-internal
+  /// duplicates resolve exactly like the sequential imports would.
+  Future<void> _refreshExpectedNames() async {
+    final library = widget.controller.library;
+    if (library == null) {
+      return;
+    }
+    final plan = _buildRenamePlan();
+    final expected = <String, String>{};
+    final claimed = <String>{};
+    final tagNames = [
+      for (final placementId in _placementIds.take(1))
+        widget.controller
+            .tagForPlacement(widget.controller.state.placementById(placementId))
+            .name,
+    ];
+    for (final source in _sources) {
+      final resolved = await library.expectedImportName(
+        _targetDirectory,
+        plan[source.path] ?? path.basename(source.path),
+        isFolder: source is Directory,
+        tagNames: tagNames,
+        importDate: DateTime.now(),
+        extraOccupiedNames: claimed,
+      );
+      expected[source.path] = resolved;
+      claimed.add(resolved);
+    }
+    if (mounted) {
+      setState(() => _expectedNames = expected);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final query = _tagQueryController.text.trim().toLowerCase();
@@ -386,16 +478,23 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
             tagQueryController: _tagQueryController,
             targetLabel: targetLabel,
             targetError: _targetError,
-            onRemoveSource: (source) => setState(() => _sources.remove(source)),
+            renameAnnotations: _renameAnnotations,
+            onRemoveSource: (source) {
+              setState(() => _sources.remove(source));
+              unawaited(_refreshExpectedNames());
+            },
             onReselect: _reselect,
             onReselectFolder: _reselectFolder,
             onChooseDestination: _chooseTargetDirectory,
             onQueryChanged: () => setState(() {}),
-            onTogglePlacement: (placementId) => setState(() {
-              if (!_placementIds.add(placementId)) {
-                _placementIds.remove(placementId);
-              }
-            }),
+            onTogglePlacement: (placementId) {
+              setState(() {
+                if (!_placementIds.add(placementId)) {
+                  _placementIds.remove(placementId);
+                }
+              });
+              unawaited(_refreshExpectedNames());
+            },
           );
           final summary = _ImportSummary(
             mode: _mode,
@@ -410,8 +509,10 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
             renameAvailable: _renameAvailable,
             renameWithTemplate: _renameWithTemplate,
             renamePreview: _renamePreview,
-            onRenameChanged: (value) =>
-                setState(() => _renameWithTemplate = value),
+            onRenameChanged: (value) {
+              setState(() => _renameWithTemplate = value);
+              unawaited(_refreshExpectedNames());
+            },
           );
           if (compact) {
             return ListView(
@@ -444,6 +545,7 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
                     targetDirectory: _targetDirectory,
                     placementIds: Set.unmodifiable(_placementIds),
                     renamedSources: Map.unmodifiable(_buildRenamePlan()),
+                    sources: List.unmodifiable(_sources),
                   ),
                 ),
           icon: Icon(
@@ -462,12 +564,14 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
     final selected = await openFiles(confirmButtonText: '导入所选文件');
     if (!mounted || selected.isEmpty) return;
     setState(() => _sources = selected.map((item) => File(item.path)).toList());
+    unawaited(_refreshExpectedNames());
   }
 
   Future<void> _reselectFolder() async {
     final selected = await getDirectoryPath(confirmButtonText: '导入此文件夹');
     if (selected == null || !mounted) return;
     setState(() => _sources = [Directory(selected)]);
+    unawaited(_refreshExpectedNames());
   }
 
   Future<void> _chooseTargetDirectory() async {
@@ -497,6 +601,7 @@ class _PrototypeImportDialogState extends State<PrototypeImportDialog> {
                 .replaceAll('\\', '/');
       _targetError = null;
     });
+    unawaited(_refreshExpectedNames());
   }
 }
 
@@ -509,6 +614,7 @@ class _ImportMain extends StatelessWidget {
     required this.tagQueryController,
     required this.targetLabel,
     required this.targetError,
+    required this.renameAnnotations,
     required this.onRemoveSource,
     required this.onReselect,
     required this.onReselectFolder,
@@ -524,6 +630,7 @@ class _ImportMain extends StatelessWidget {
   final TextEditingController tagQueryController;
   final String targetLabel;
   final String? targetError;
+  final Map<String, String> renameAnnotations;
   final ValueChanged<FileSystemEntity> onRemoveSource;
   final Future<void> Function() onReselect;
   final Future<void> Function() onReselectFolder;
@@ -581,6 +688,7 @@ class _ImportMain extends StatelessWidget {
                 itemBuilder: (context, index) {
                   final source = sources[index];
                   final folder = source is Directory;
+                  final annotation = renameAnnotations[source.path];
                   return Container(
                     decoration: BoxDecoration(
                       border: Border(
@@ -599,8 +707,21 @@ class _ImportMain extends StatelessWidget {
                             mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                path.basename(source.path),
+                              Text.rich(
+                                TextSpan(
+                                  text: path.basename(source.path),
+                                  children: [
+                                    if (annotation != null)
+                                      TextSpan(
+                                        text: ' → $annotation',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w500,
+                                          color: _primary(context),
+                                        ),
+                                      ),
+                                  ],
+                                ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -962,6 +1083,7 @@ class PrototypeSettingsResult {
     required this.moveImportsByDefault,
     required this.floatingDropTargetEnabled,
     required this.closeToTray,
+    required this.autoStartEnabled,
     required this.startupView,
     required this.appearanceTheme,
     required this.interfaceDensity,
@@ -973,6 +1095,7 @@ class PrototypeSettingsResult {
   final bool moveImportsByDefault;
   final bool floatingDropTargetEnabled;
   final bool closeToTray;
+  final bool autoStartEnabled;
   final String startupView;
   final String appearanceTheme;
   final String interfaceDensity;
@@ -1020,6 +1143,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
   late bool _moveImportsByDefault;
   late bool _floatingDropTargetEnabled;
   late bool _closeToTray;
+  late bool _autoStartEnabled;
   late String _startupView;
   late String _appearanceTheme;
   late String _interfaceDensity;
@@ -1038,6 +1162,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
     _moveImportsByDefault = preferences.moveImportsByDefault;
     _floatingDropTargetEnabled = preferences.floatingDropTargetEnabled;
     _closeToTray = preferences.closeToTray;
+    _autoStartEnabled = preferences.autoStartEnabled;
     _startupView = preferences.startupView;
     _appearanceTheme = preferences.appearanceTheme;
     _interfaceDensity = preferences.interfaceDensity;
@@ -1110,6 +1235,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
                   moveImportsByDefault: _moveImportsByDefault,
                   floatingDropTargetEnabled: _floatingDropTargetEnabled,
                   closeToTray: _closeToTray,
+                  autoStartEnabled: _autoStartEnabled,
                   startupView: _startupView,
                   appearanceTheme: _appearanceTheme,
                   interfaceDensity: _interfaceDensity,
@@ -1371,6 +1497,15 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
   }
 
   List<Widget> _windowsSettings(bool compact) => [
+    _SettingRow(
+      title: '开机自动启动',
+      subtitle: '登录 Windows 后自动启动 TAGTAG',
+      compact: compact,
+      trailing: PillSwitch(
+        value: _autoStartEnabled,
+        onChanged: (value) => setState(() => _autoStartEnabled = value),
+      ),
+    ),
     _SettingRow(
       title: '悬浮接收目标',
       subtitle: '将资源拖到悬浮目标开始导入',
@@ -2168,3 +2303,197 @@ Color _border(BuildContext context) =>
     Theme.of(context).colorScheme.outlineVariant;
 Color _subtle(BuildContext context) =>
     Theme.of(context).colorScheme.surfaceContainerLow;
+
+/// Opens the rename dialog for [resource]. Quick suffix chips only edit the
+/// text field; nothing is renamed until 保存 is pressed. Returns true when a
+/// rename actually happened.
+Future<bool?> showRenameResourceDialog(
+  BuildContext context, {
+  required TagTagController controller,
+  required TagResource resource,
+}) {
+  return showPrototypeDialog<bool>(
+    context: context,
+    builder: (context) =>
+        _RenameResourceDialog(controller: controller, resource: resource),
+  );
+}
+
+class _RenameResourceDialog extends StatefulWidget {
+  const _RenameResourceDialog({
+    required this.controller,
+    required this.resource,
+  });
+
+  final TagTagController controller;
+  final TagResource resource;
+
+  @override
+  State<_RenameResourceDialog> createState() => _RenameResourceDialogState();
+}
+
+class _RenameResourceDialogState extends State<_RenameResourceDialog> {
+  late final TextEditingController _nameController;
+  String? _error;
+
+  bool get _isFolder => widget.resource.kind == ResourceKind.folder;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.resource.name);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  String get _firstTagName {
+    final placements = widget.controller.assignmentsForResource(
+      widget.resource.id,
+    );
+    if (placements.isEmpty) return '';
+    return widget.controller.tagForPlacement(placements.first).name;
+  }
+
+  String _withSuffix(String name, String suffix) {
+    if (_isFolder) return '$name$suffix';
+    final dot = name.lastIndexOf('.');
+    if (dot <= 0) return '$name$suffix';
+    return '${name.substring(0, dot)}$suffix${name.substring(dot)}';
+  }
+
+  void _applyChip(String Function(String current) transform) {
+    final text = _nameController.text.trim();
+    if (text.isEmpty) return;
+    setState(() {
+      _error = null;
+      _nameController.text = transform(text);
+    });
+  }
+
+  void _addDateSuffix() {
+    final now = DateTime.now();
+    String two(int unit) => unit.toString().padLeft(2, '0');
+    final label = '${two(now.month)}-${two(now.day)}';
+    _applyChip(
+      (current) => current.contains('-$label')
+          ? current
+          : _withSuffix(current, '-$label'),
+    );
+  }
+
+  void _addTagSuffix() {
+    final tagName = _firstTagName;
+    if (tagName.isEmpty) return;
+    _applyChip(
+      (current) => current.contains('-$tagName')
+          ? current
+          : _withSuffix(current, '-$tagName'),
+    );
+  }
+
+  void _addIndexSuffix() {
+    _applyChip((current) {
+      final pattern = RegExp(r'^(.*) \((\d+)\)(\..*)?$');
+      final match = pattern.firstMatch(current);
+      if (match != null) {
+        final next = int.parse(match.group(2)!) + 1;
+        return '${match.group(1)} ($next)${match.group(3) ?? ''}';
+      }
+      return _withSuffix(current, ' (2)');
+    });
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _error = '名称不能为空');
+      return;
+    }
+    if (RegExp(r'[\\/:*?"<>|]').hasMatch(name)) {
+      setState(() => _error = '名称不能包含 \\ / : * ? " < > | 字符');
+      return;
+    }
+    if (name == widget.resource.name) {
+      Navigator.pop(context);
+      return;
+    }
+    try {
+      await widget.controller.renameResource(widget.resource.id, name);
+      if (mounted) Navigator.pop(context, true);
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tagName = _firstTagName;
+    return PrototypeDialogFrame(
+      width: 460,
+      desktopHeight: null,
+      icon: Icons.drive_file_rename_outline,
+      title: '重命名',
+      subtitle: widget.resource.name,
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              key: const ValueKey('rename-field'),
+              controller: _nameController,
+              autofocus: true,
+              decoration: const InputDecoration(hintText: '新名称'),
+              onSubmitted: (_) => unawaited(_save()),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ActionChip(
+                  label: const Text('时间后缀'),
+                  onPressed: _addDateSuffix,
+                ),
+                ActionChip(
+                  label: Text(tagName.isEmpty ? 'TAG后缀' : 'TAG后缀（$tagName）'),
+                  onPressed: tagName.isEmpty ? null : _addTagSuffix,
+                ),
+                ActionChip(
+                  label: const Text('序号后缀'),
+                  onPressed: _addIndexSuffix,
+                ),
+              ],
+            ),
+            if (_error != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                _error!,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () => unawaited(_save()),
+          child: const Text('保存'),
+        ),
+      ],
+    );
+  }
+}

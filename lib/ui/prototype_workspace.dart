@@ -62,10 +62,12 @@ class PrototypeWorkspace extends StatefulWidget {
     required this.onOpenResource,
     required this.onRevealResource,
     required this.onAddTag,
+    required this.onEditResourceTags,
     required this.onClearTags,
     required this.onRestoreResource,
     required this.onMoveResource,
     required this.onRecycleResource,
+    required this.onRenameResource,
     required this.onCreateTag,
     required this.onEditTag,
     required this.onMergeTag,
@@ -90,10 +92,12 @@ class PrototypeWorkspace extends StatefulWidget {
   final ResourceAction onOpenResource;
   final ResourceAction onRevealResource;
   final ResourceAction onAddTag;
+  final ResourceAction onEditResourceTags;
   final ResourceAction onClearTags;
   final ResourceAction onRestoreResource;
   final ResourceAction onMoveResource;
   final ResourceAction onRecycleResource;
+  final ResourceAction onRenameResource;
   final Future<void> Function(String? parentId) onCreateTag;
   final Future<void> Function(String placementId) onEditTag;
   final Future<void> Function(String placementId) onMergeTag;
@@ -199,10 +203,12 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                                 onOpenResource: widget.onOpenResource,
                                 onRevealResource: widget.onRevealResource,
                                 onAddTag: widget.onAddTag,
+                                onEditResourceTags: widget.onEditResourceTags,
                                 onClearTags: widget.onClearTags,
                                 onRestoreResource: widget.onRestoreResource,
                                 onMoveResource: widget.onMoveResource,
                                 onRecycleResource: widget.onRecycleResource,
+                                onRenameResource: widget.onRenameResource,
                                 onCreateTag: widget.onCreateTag,
                                 onEditTag: widget.onEditTag,
                                 onMergeTag: widget.onMergeTag,
@@ -1139,10 +1145,12 @@ class _MainWorkspace extends StatelessWidget {
     required this.onOpenResource,
     required this.onRevealResource,
     required this.onAddTag,
+    required this.onEditResourceTags,
     required this.onClearTags,
     required this.onRestoreResource,
     required this.onMoveResource,
     required this.onRecycleResource,
+    required this.onRenameResource,
     required this.onCreateTag,
     required this.onEditTag,
     required this.onMergeTag,
@@ -1165,10 +1173,12 @@ class _MainWorkspace extends StatelessWidget {
   final ResourceAction onOpenResource;
   final ResourceAction onRevealResource;
   final ResourceAction onAddTag;
+  final ResourceAction onEditResourceTags;
   final ResourceAction onClearTags;
   final ResourceAction onRestoreResource;
   final ResourceAction onMoveResource;
   final ResourceAction onRecycleResource;
+  final ResourceAction onRenameResource;
   final Future<void> Function(String? parentId) onCreateTag;
   final Future<void> Function(String placementId) onEditTag;
   final Future<void> Function(String placementId) onMergeTag;
@@ -1341,6 +1351,13 @@ class _MainWorkspace extends StatelessWidget {
                 controller: controller,
                 windowWidth: windowWidth,
                 onOpen: onOpenResource,
+                onReveal: onRevealResource,
+                onAddTag: onAddTag,
+                onEditResourceTags: onEditResourceTags,
+                onRestore: onRestoreResource,
+                onMove: onMoveResource,
+                onRecycle: onRecycleResource,
+                onRename: onRenameResource,
                 onCreateTag: onCreateTag,
                 onEditTag: onEditTag,
                 onMergeTag: onMergeTag,
@@ -1392,10 +1409,12 @@ class _MainWorkspace extends StatelessWidget {
                 onOpen: onOpenResource,
                 onReveal: onRevealResource,
                 onAddTag: onAddTag,
+                onEditTags: onEditResourceTags,
                 onClearTags: onClearTags,
                 onRestore: onRestoreResource,
                 onMove: onMoveResource,
                 onRecycle: onRecycleResource,
+                onRename: onRenameResource,
               ),
             ),
           ],
@@ -1510,10 +1529,12 @@ class _ResourceTable extends StatelessWidget {
     required this.onOpen,
     required this.onReveal,
     required this.onAddTag,
+    required this.onEditTags,
     required this.onClearTags,
     required this.onRestore,
     required this.onMove,
     required this.onRecycle,
+    required this.onRename,
   });
 
   final TagTagController controller;
@@ -1526,10 +1547,12 @@ class _ResourceTable extends StatelessWidget {
   final ResourceAction onOpen;
   final ResourceAction onReveal;
   final ResourceAction onAddTag;
+  final ResourceAction onEditTags;
   final ResourceAction onClearTags;
   final ResourceAction onRestore;
   final ResourceAction onMove;
   final ResourceAction onRecycle;
+  final ResourceAction onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -1590,10 +1613,12 @@ class _ResourceTable extends StatelessWidget {
                 onOpen: onOpen,
                 onReveal: onReveal,
                 onAddTag: onAddTag,
+                onEditTags: onEditTags,
                 onClearTags: onClearTags,
                 onRestore: onRestore,
                 onMove: onMove,
                 onRecycle: onRecycle,
+                onRename: onRename,
               );
             },
           ),
@@ -1613,10 +1638,12 @@ class _ResourceTableRow extends StatefulWidget {
     required this.onOpen,
     required this.onReveal,
     required this.onAddTag,
+    required this.onEditTags,
     required this.onClearTags,
     required this.onRestore,
     required this.onMove,
     required this.onRecycle,
+    required this.onRename,
   });
 
   final TagTagController controller;
@@ -1627,10 +1654,12 @@ class _ResourceTableRow extends StatefulWidget {
   final ResourceAction onOpen;
   final ResourceAction onReveal;
   final ResourceAction onAddTag;
+  final ResourceAction onEditTags;
   final ResourceAction onClearTags;
   final ResourceAction onRestore;
   final ResourceAction onMove;
   final ResourceAction onRecycle;
+  final ResourceAction onRename;
 
   @override
   State<_ResourceTableRow> createState() => _ResourceTableRowState();
@@ -1649,139 +1678,122 @@ class _ResourceTableRowState extends State<_ResourceTableRow> {
     final effectiveTags = widget.controller.effectiveTagsForResource(
       widget.resource.id,
     );
-    return FocusableActionDetector(
-      mouseCursor: SystemMouseCursors.click,
-      onShowHoverHighlight: (value) => setState(() => _hovered = value),
-      onShowFocusHighlight: (value) => setState(() => _focused = value),
-      shortcuts: const {
-        SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
-      },
-      actions: {
-        ActivateIntent: CallbackAction<ActivateIntent>(
-          onInvoke: (_) {
-            widget.onInspect(widget.resource);
-            return null;
-          },
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onSecondaryTapUp: (details) => unawaited(
+        _showResourceContextMenu(
+          context,
+          controller: widget.controller,
+          resource: widget.resource,
+          position: details.globalPosition,
+          onOpen: widget.onOpen,
+          onReveal: widget.onReveal,
+          onAddTag: widget.onAddTag,
+          onEditTags: widget.onEditTags,
+          onRestore: widget.onRestore,
+          onMove: widget.onMove,
+          onRecycle: widget.onRecycle,
+          onRename: widget.onRename,
         ),
-      },
-      child: InkWell(
-        onTap: () => widget.onInspect(widget.resource),
-        onDoubleTap: () => unawaited(widget.onOpen(widget.resource)),
-        child: Container(
-          foregroundDecoration: _focused
-              ? BoxDecoration(
-                  border: Border.all(color: palette.primary, width: 2),
-                )
-              : null,
-          decoration: BoxDecoration(
-            color: widget.inspected
-                ? palette.primarySoft
-                : _hovered
-                ? _canvasTint(context)
-                : Colors.transparent,
-            border: Border(bottom: BorderSide(color: palette.border)),
+      ),
+      child: FocusableActionDetector(
+        mouseCursor: SystemMouseCursors.click,
+        onShowHoverHighlight: (value) => setState(() => _hovered = value),
+        onShowFocusHighlight: (value) => setState(() => _focused = value),
+        shortcuts: const {
+          SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+        },
+        actions: {
+          ActivateIntent: CallbackAction<ActivateIntent>(
+            onInvoke: (_) {
+              widget.onInspect(widget.resource);
+              return null;
+            },
           ),
-          child: _TableCells(
-            windowWidth: widget.windowWidth,
-            checkbox: _TableCheckbox(
-              value: selected,
-              onChanged: (value) => widget.controller.toggleResourceSelection(
-                widget.resource.id,
-                value ?? false,
+        },
+        child: InkWell(
+          onTap: () => widget.onInspect(widget.resource),
+          onDoubleTap: () => unawaited(widget.onOpen(widget.resource)),
+          child: Container(
+            foregroundDecoration: _focused
+                ? BoxDecoration(
+                    border: Border.all(color: palette.primary, width: 2),
+                  )
+                : null,
+            decoration: BoxDecoration(
+              color: widget.inspected
+                  ? palette.primarySoft
+                  : _hovered
+                  ? _canvasTint(context)
+                  : Colors.transparent,
+              border: Border(bottom: BorderSide(color: palette.border)),
+            ),
+            child: _TableCells(
+              windowWidth: widget.windowWidth,
+              checkbox: _TableCheckbox(
+                value: selected,
+                onChanged: (value) => widget.controller.toggleResourceSelection(
+                  widget.resource.id,
+                  value ?? false,
+                ),
               ),
-            ),
-            name: _ResourceIdentity(
-              resource: widget.resource,
-              tight: widget.windowWidth <= 440,
-              storageRoot: widget.controller.storageRoot?.path,
-            ),
-            tags: _EffectiveTags(tags: effectiveTags),
-            type: Text(_resourceType(widget.resource)),
-            size: Text(_formatBytes(widget.resource.sizeBytes)),
-            modified: Text(_formatDate(widget.resource.modifiedAt)),
-            actions: AnimatedOpacity(
-              duration: const Duration(milliseconds: 120),
-              opacity: _hovered || widget.inspected ? 1 : 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (widget.windowWidth >= 720)
-                    _SmallIconButton(
-                      icon: widget.resource.kind == ResourceKind.folder
-                          ? Icons.folder_open_outlined
-                          : Icons.open_in_new,
-                      tooltip: '打开',
-                      size: 29,
-                      onPressed: () =>
-                          unawaited(widget.onOpen(widget.resource)),
+              name: _ResourceIdentity(
+                resource: widget.resource,
+                tight: widget.windowWidth <= 440,
+                storageRoot: widget.controller.storageRoot?.path,
+              ),
+              tags: _EffectiveTags(tags: effectiveTags),
+              type: Text(_resourceType(widget.resource)),
+              size: Text(_formatBytes(widget.resource.sizeBytes)),
+              modified: Text(_formatDate(widget.resource.modifiedAt)),
+              actions: AnimatedOpacity(
+                duration: const Duration(milliseconds: 120),
+                opacity: _hovered || widget.inspected ? 1 : 0,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (widget.windowWidth >= 720)
+                      _SmallIconButton(
+                        icon: widget.resource.kind == ResourceKind.folder
+                            ? Icons.folder_open_outlined
+                            : Icons.open_in_new,
+                        tooltip: '打开',
+                        size: 29,
+                        onPressed: () =>
+                            unawaited(widget.onOpen(widget.resource)),
+                      ),
+                    SizedBox(
+                      width: 34,
+                      height: 29,
+                      child: PopupMenuButton<_ResourceMenuAction>(
+                        tooltip: '更多操作',
+                        padding: EdgeInsets.zero,
+                        icon: const Icon(Icons.more_horiz, size: 18),
+                        constraints: const BoxConstraints(minWidth: 190),
+                        onSelected: (action) => _dispatchResourceMenuAction(
+                          action,
+                          resource: widget.resource,
+                          onOpen: widget.onOpen,
+                          onReveal: widget.onReveal,
+                          onAddTag: widget.onAddTag,
+                          onEditTags: widget.onEditTags,
+                          onClearTags: widget.onClearTags,
+                          onRestore: widget.onRestore,
+                          onMove: widget.onMove,
+                          onRecycle: widget.onRecycle,
+                          onRename: widget.onRename,
+                        ),
+                        itemBuilder: (context) => _resourceMenuEntries(
+                          controller: widget.controller,
+                          resource: widget.resource,
+                          includeClearTags: true,
+                          addTagLabel: '添加标签',
+                        ),
+                      ),
                     ),
-                  SizedBox(
-                    width: 34,
-                    height: 29,
-                    child: PopupMenuButton<_ResourceMenuAction>(
-                      tooltip: '更多操作',
-                      padding: EdgeInsets.zero,
-                      icon: const Icon(Icons.more_horiz, size: 18),
-                      constraints: const BoxConstraints(minWidth: 190),
-                      onSelected: (action) {
-                        switch (action) {
-                          case _ResourceMenuAction.reveal:
-                            unawaited(widget.onReveal(widget.resource));
-                          case _ResourceMenuAction.addTag:
-                            unawaited(widget.onAddTag(widget.resource));
-                          case _ResourceMenuAction.clearTags:
-                            unawaited(widget.onClearTags(widget.resource));
-                          case _ResourceMenuAction.restore:
-                            unawaited(widget.onRestore(widget.resource));
-                          case _ResourceMenuAction.move:
-                            unawaited(widget.onMove(widget.resource));
-                          case _ResourceMenuAction.recycle:
-                            unawaited(widget.onRecycle(widget.resource));
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        const PopupMenuItem(
-                          value: _ResourceMenuAction.reveal,
-                          child: _MenuLabel(
-                            Icons.folder_open_outlined,
-                            '在资源管理器中定位',
-                          ),
-                        ),
-                        const PopupMenuItem(
-                          value: _ResourceMenuAction.addTag,
-                          child: _MenuLabel(Icons.sell_outlined, '添加标签'),
-                        ),
-                        if (widget.controller
-                            .assignmentsForResource(widget.resource.id)
-                            .isNotEmpty)
-                          const PopupMenuItem(
-                            value: _ResourceMenuAction.clearTags,
-                            child: _MenuLabel(
-                              Icons.label_off_outlined,
-                              '清除全部直接标签',
-                            ),
-                          ),
-                        const PopupMenuDivider(),
-                        const PopupMenuItem(
-                          value: _ResourceMenuAction.restore,
-                          child: _MenuLabel(Icons.restore, '恢复先前路径并退出管理'),
-                        ),
-                        const PopupMenuItem(
-                          value: _ResourceMenuAction.move,
-                          child: _MenuLabel(
-                            Icons.drive_file_move_outline,
-                            '移动到指定位置并退出',
-                          ),
-                        ),
-                        const PopupMenuItem(
-                          value: _ResourceMenuAction.recycle,
-                          child: _MenuLabel(Icons.delete_outline, '移入回收站并退出'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -2360,6 +2372,13 @@ class _TagWorkbench extends StatefulWidget {
     required this.controller,
     required this.windowWidth,
     required this.onOpen,
+    required this.onReveal,
+    required this.onAddTag,
+    required this.onEditResourceTags,
+    required this.onRestore,
+    required this.onMove,
+    required this.onRecycle,
+    required this.onRename,
     required this.onCreateTag,
     required this.onEditTag,
     required this.onMergeTag,
@@ -2370,6 +2389,13 @@ class _TagWorkbench extends StatefulWidget {
   final TagTagController controller;
   final double windowWidth;
   final ResourceAction onOpen;
+  final ResourceAction onReveal;
+  final ResourceAction onAddTag;
+  final ResourceAction onEditResourceTags;
+  final ResourceAction onRestore;
+  final ResourceAction onMove;
+  final ResourceAction onRecycle;
+  final ResourceAction onRename;
   final Future<void> Function(String? parentId) onCreateTag;
   final Future<void> Function(String placementId) onEditTag;
   final Future<void> Function(String placementId) onMergeTag;
@@ -2409,6 +2435,13 @@ class _TagWorkbenchState extends State<_TagWorkbench> {
             controller: controller,
             placement: active,
             onOpen: widget.onOpen,
+            onReveal: widget.onReveal,
+            onAddTag: widget.onAddTag,
+            onEditResourceTags: widget.onEditResourceTags,
+            onRestore: widget.onRestore,
+            onMove: widget.onMove,
+            onRecycle: widget.onRecycle,
+            onRename: widget.onRename,
             onCreateTag: widget.onCreateTag,
             onEditTag: widget.onEditTag,
             onMergeTag: widget.onMergeTag,
@@ -2867,6 +2900,13 @@ class _TagResultPanel extends StatelessWidget {
     required this.controller,
     required this.placement,
     required this.onOpen,
+    required this.onReveal,
+    required this.onAddTag,
+    required this.onEditResourceTags,
+    required this.onRestore,
+    required this.onMove,
+    required this.onRecycle,
+    required this.onRename,
     required this.onCreateTag,
     required this.onEditTag,
     required this.onMergeTag,
@@ -2877,6 +2917,13 @@ class _TagResultPanel extends StatelessWidget {
   final TagTagController controller;
   final TagPlacement? placement;
   final ResourceAction onOpen;
+  final ResourceAction onReveal;
+  final ResourceAction onAddTag;
+  final ResourceAction onEditResourceTags;
+  final ResourceAction onRestore;
+  final ResourceAction onMove;
+  final ResourceAction onRecycle;
+  final ResourceAction onRename;
   final Future<void> Function(String? parentId) onCreateTag;
   final Future<void> Function(String placementId) onEditTag;
   final Future<void> Function(String placementId) onMergeTag;
@@ -3100,32 +3147,51 @@ class _TagResultPanel extends StatelessWidget {
             itemCount: resources.length,
             itemBuilder: (context, index) {
               final resource = resources[index];
-              return InkWell(
-                onDoubleTap: () => unawaited(onOpen(resource)),
-                child: Container(
-                  height: 56,
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: palette.border)),
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onSecondaryTapUp: (details) => unawaited(
+                  _showResourceContextMenu(
+                    context,
+                    controller: controller,
+                    resource: resource,
+                    position: details.globalPosition,
+                    onOpen: onOpen,
+                    onReveal: onReveal,
+                    onAddTag: onAddTag,
+                    onEditTags: onEditResourceTags,
+                    onRestore: onRestore,
+                    onMove: onMove,
+                    onRecycle: onRecycle,
+                    onRename: onRename,
                   ),
-                  child: Row(
-                    children: [
-                      _ResourceIcon(resource: resource, size: 30),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _ResourceIdentity(
-                          resource: resource,
-                          storageRoot: controller.storageRoot?.path,
+                ),
+                child: InkWell(
+                  onDoubleTap: () => unawaited(onOpen(resource)),
+                  child: Container(
+                    height: 56,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: palette.border)),
+                    ),
+                    child: Row(
+                      children: [
+                        _ResourceIcon(resource: resource, size: 30),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _ResourceIdentity(
+                            resource: resource,
+                            storageRoot: controller.storageRoot?.path,
+                          ),
                         ),
-                      ),
-                      Text(
-                        _formatDate(resource.modifiedAt),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: palette.textFaint,
+                        Text(
+                          _formatDate(resource.modifiedAt),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: palette.textFaint,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               );
@@ -4469,6 +4535,7 @@ class _HistoryEntry {
         Icons.drive_file_move_outline,
         '整理资源到标签目录',
       ),
+      ManagedOperationType.rename => (Icons.drive_file_rename_outline, '重命名资源'),
     };
     return _HistoryEntry(
       id: operation.id,
@@ -4653,7 +4720,154 @@ class _MenuLabel extends StatelessWidget {
   );
 }
 
-enum _ResourceMenuAction { reveal, addTag, clearTags, restore, move, recycle }
+enum _ResourceMenuAction {
+  open,
+  reveal,
+  addTag,
+  editTags,
+  clearTags,
+  rename,
+  restore,
+  move,
+  recycle,
+}
+
+/// Shared row-action entries for both the hover 更多操作 popup and the
+/// right-click context menu. The popup keeps the extra 清除全部直接标签 entry
+/// and its historical 添加标签 label.
+List<PopupMenuEntry<_ResourceMenuAction>> _resourceMenuEntries({
+  required TagTagController controller,
+  required TagResource resource,
+  bool includeClearTags = false,
+  String addTagLabel = '添加新标签',
+}) {
+  return [
+    PopupMenuItem(
+      value: _ResourceMenuAction.open,
+      child: _MenuLabel(
+        resource.kind == ResourceKind.folder
+            ? Icons.folder_open_outlined
+            : Icons.open_in_new,
+        '打开',
+      ),
+    ),
+    const PopupMenuItem(
+      value: _ResourceMenuAction.reveal,
+      child: _MenuLabel(Icons.folder_open_outlined, '在资源管理器中定位'),
+    ),
+    PopupMenuItem(
+      value: _ResourceMenuAction.addTag,
+      child: _MenuLabel(Icons.sell_outlined, addTagLabel),
+    ),
+    const PopupMenuItem(
+      value: _ResourceMenuAction.editTags,
+      child: _MenuLabel(Icons.edit_outlined, '修改标签…'),
+    ),
+    const PopupMenuItem(
+      value: _ResourceMenuAction.rename,
+      child: _MenuLabel(Icons.drive_file_rename_outline, '重命名…'),
+    ),
+    if (includeClearTags &&
+        controller.assignmentsForResource(resource.id).isNotEmpty)
+      const PopupMenuItem(
+        value: _ResourceMenuAction.clearTags,
+        child: _MenuLabel(Icons.label_off_outlined, '清除全部直接标签'),
+      ),
+    const PopupMenuDivider(),
+    const PopupMenuItem(
+      value: _ResourceMenuAction.restore,
+      child: _MenuLabel(Icons.restore, '恢复先前路径并退出管理'),
+    ),
+    const PopupMenuItem(
+      value: _ResourceMenuAction.move,
+      child: _MenuLabel(Icons.drive_file_move_outline, '移动到指定位置并退出'),
+    ),
+    const PopupMenuItem(
+      value: _ResourceMenuAction.recycle,
+      child: _MenuLabel(Icons.delete_outline, '移入回收站并退出'),
+    ),
+  ];
+}
+
+void _dispatchResourceMenuAction(
+  _ResourceMenuAction action, {
+  required TagResource resource,
+  required ResourceAction onOpen,
+  required ResourceAction onReveal,
+  required ResourceAction onAddTag,
+  ResourceAction? onEditTags,
+  ResourceAction? onClearTags,
+  required ResourceAction onRename,
+  required ResourceAction onRestore,
+  required ResourceAction onMove,
+  required ResourceAction onRecycle,
+}) {
+  switch (action) {
+    case _ResourceMenuAction.open:
+      unawaited(onOpen(resource));
+    case _ResourceMenuAction.reveal:
+      unawaited(onReveal(resource));
+    case _ResourceMenuAction.addTag:
+      unawaited(onAddTag(resource));
+    case _ResourceMenuAction.editTags:
+      if (onEditTags != null) unawaited(onEditTags(resource));
+    case _ResourceMenuAction.clearTags:
+      if (onClearTags != null) unawaited(onClearTags(resource));
+    case _ResourceMenuAction.rename:
+      unawaited(onRename(resource));
+    case _ResourceMenuAction.restore:
+      unawaited(onRestore(resource));
+    case _ResourceMenuAction.move:
+      unawaited(onMove(resource));
+    case _ResourceMenuAction.recycle:
+      unawaited(onRecycle(resource));
+  }
+}
+
+/// Right-click handler for resource rows (table and hierarchy result panel):
+/// single-selects the resource, then opens the action menu at the pointer.
+Future<void> _showResourceContextMenu(
+  BuildContext context, {
+  required TagTagController controller,
+  required TagResource resource,
+  required Offset position,
+  required ResourceAction onOpen,
+  required ResourceAction onReveal,
+  required ResourceAction onAddTag,
+  required ResourceAction onEditTags,
+  required ResourceAction onRename,
+  required ResourceAction onRestore,
+  required ResourceAction onMove,
+  required ResourceAction onRecycle,
+}) async {
+  controller.selectResource(resource.id);
+  final action = await showMenu<_ResourceMenuAction>(
+    context: context,
+    position: RelativeRect.fromLTRB(
+      position.dx,
+      position.dy,
+      position.dx,
+      position.dy,
+    ),
+    constraints: const BoxConstraints(minWidth: 190),
+    items: _resourceMenuEntries(controller: controller, resource: resource),
+  );
+  if (action == null) {
+    return;
+  }
+  _dispatchResourceMenuAction(
+    action,
+    resource: resource,
+    onOpen: onOpen,
+    onReveal: onReveal,
+    onAddTag: onAddTag,
+    onEditTags: onEditTags,
+    onRename: onRename,
+    onRestore: onRestore,
+    onMove: onMove,
+    onRecycle: onRecycle,
+  );
+}
 
 enum _ImportMenuAction { files, folder }
 

@@ -213,6 +213,7 @@ class TagTagController extends ChangeNotifier {
     bool? moveImportsByDefault,
     bool? floatingDropTargetEnabled,
     bool? closeToTray,
+    bool? autoStartEnabled,
     String? startupView,
     String? appearanceTheme,
     String? interfaceDensity,
@@ -227,6 +228,7 @@ class TagTagController extends ChangeNotifier {
       moveImportsByDefault: moveImportsByDefault,
       floatingDropTargetEnabled: floatingDropTargetEnabled,
       closeToTray: closeToTray,
+      autoStartEnabled: autoStartEnabled,
       startupView: startupView,
       appearanceTheme: appearanceTheme,
       interfaceDensity: interfaceDensity,
@@ -269,6 +271,9 @@ class TagTagController extends ChangeNotifier {
     }
     if (before.closeToTray != after.closeToTray) {
       changes.add('关闭主窗口时 ${after.closeToTray ? '隐藏到托盘' : '退出'}');
+    }
+    if (before.autoStartEnabled != after.autoStartEnabled) {
+      changes.add('开机自动启动 ${after.autoStartEnabled ? '开启' : '关闭'}');
     }
     if (before.startupView != after.startupView) {
       const labels = {'last': '上次使用的视图', 'all': '全部资源', 'inbox': '待整理'};
@@ -1643,6 +1648,11 @@ class TagTagController extends ChangeNotifier {
       targetDirectory: targetDirectory,
       mode: mode,
       targetName: targetName,
+      tagNames: [
+        for (final placementId in normalizedPlacementIds.take(1))
+          _state.tagById(_state.placementById(placementId).tagId).name,
+      ],
+      importDate: DateTime.now(),
     );
     final resource = _tagResourceFromManaged(managed);
     final now = DateTime.now();
@@ -2052,6 +2062,7 @@ class TagTagController extends ChangeNotifier {
       ManagedOperationType.externalMoveAccept => '接受外部移动',
       ManagedOperationType.externalMoveRestore => '恢复记录路径',
       ManagedOperationType.organizeMove => '整理资源到标签目录',
+      ManagedOperationType.rename => '重命名资源',
     };
     final suffix = operation.undoneAt == null ? '' : '（已撤销）';
     return '$title “$name”$suffix';
@@ -2208,6 +2219,17 @@ class TagTagController extends ChangeNotifier {
   /// Executes the organize run: every movable resource from a fresh preview
   /// is moved into the tag-path directory as one managed operation each
   /// (operation log type `organizeMove`, undoable at the API level).
+  /// Renames a managed resource inside the storage root (never overwrites).
+  Future<void> renameResource(String resourceId, String newName) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    await managedLibrary.renameResource(resourceId, newName);
+    await _syncManagedResources();
+    notifyListeners();
+  }
+
   Future<OrganizeMoveSummary> organizeForPlacement(String placementId) async {
     final managedLibrary = library;
     if (managedLibrary == null) {
@@ -2271,8 +2293,10 @@ class TagTagController extends ChangeNotifier {
     final assignments = [..._state.assignments];
     var folderTagInheritances = [..._state.folderTagInheritances];
     final events = [..._state.usageEvents];
+    var addedAssignment = false;
     for (final resourceId in selectedResourceIds) {
       if (existing.add('$resourceId|$placementId')) {
+        addedAssignment = true;
         assignments.add(
           TagAssignment(
             id: newId('assignment'),
@@ -2316,11 +2340,53 @@ class TagTagController extends ChangeNotifier {
         );
       }
     }
+    var next = _state.copyWith(
+      assignments: assignments,
+      folderTagInheritances: folderTagInheritances,
+      usageEvents: events,
+    );
+    if (addedAssignment) {
+      final tagName = _state.tagById(placement.tagId).name;
+      next = _withTagOperation(
+        next,
+        TagDomainOperationType.edit,
+        '为资源添加标签“$tagName”',
+      );
+    }
+    await _update(next);
+  }
+
+  /// Removes the direct assignment of [placementId] from a single resource,
+  /// recording the change in the tag-operation log. No-op when the resource
+  /// does not carry that placement.
+  Future<void> removePlacementAssignment(
+    String resourceId,
+    String placementId,
+  ) async {
+    final spaceId = activeSpaceId;
+    if (spaceId == null) {
+      return;
+    }
+    final placement = _state.placementById(placementId);
+    if (placement.spaceId != spaceId) {
+      throw StateError('只能使用当前标签空间中的标签');
+    }
+    final remaining = _state.assignments
+        .where(
+          (assignment) =>
+              assignment.resourceId != resourceId ||
+              assignment.placementId != placementId,
+        )
+        .toList();
+    if (remaining.length == _state.assignments.length) {
+      return;
+    }
+    final tagName = _state.tagById(placement.tagId).name;
     await _update(
-      _state.copyWith(
-        assignments: assignments,
-        folderTagInheritances: folderTagInheritances,
-        usageEvents: events,
+      _withTagOperation(
+        _state.copyWith(assignments: remaining),
+        TagDomainOperationType.edit,
+        '移除资源标签“$tagName”',
       ),
     );
   }

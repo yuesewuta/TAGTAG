@@ -86,6 +86,9 @@ class _TagTagHomeState extends State<TagTagHome> {
     unawaited(
       _closeBehavior.setCloseToTray(controller.preferences.closeToTray),
     );
+    unawaited(
+      _closeBehavior.setAutoStart(controller.preferences.autoStartEnabled),
+    );
     unawaited(_configureGlobalQuickTag());
     unawaited(_configureFloatingDropTarget());
     if (widget.initialExternalQuickTagPaths.isNotEmpty) {
@@ -167,10 +170,12 @@ class _TagTagHomeState extends State<TagTagHome> {
                     onOpenResource: _openResource,
                     onRevealResource: _revealResource,
                     onAddTag: _addTagToResource,
+                    onEditResourceTags: _editTagsForResource,
                     onClearTags: _clearTagsForResource,
                     onRestoreResource: _restoreResource,
                     onMoveResource: _moveResourceToSpecifiedPath,
                     onRecycleResource: _recycleResource,
+                    onRenameResource: _renameResource,
                     onCreateTag: (parentId) =>
                         _showCreateTag(parentId: parentId),
                     onEditTag: (placementId) async {
@@ -200,6 +205,17 @@ class _TagTagHomeState extends State<TagTagHome> {
         _searchFocusNode.requestFocus();
       }
     });
+  }
+
+  Future<void> _renameResource(TagResource resource) async {
+    final renamed = await showRenameResourceDialog(
+      _dialogContext,
+      controller: controller,
+      resource: resource,
+    );
+    if (renamed == true && mounted) {
+      _showMessage('已重命名资源。');
+    }
   }
 
   Future<void> _showSettings() async {
@@ -244,6 +260,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       moveImportsByDefault: result.moveImportsByDefault,
       floatingDropTargetEnabled: result.floatingDropTargetEnabled,
       closeToTray: result.closeToTray,
+      autoStartEnabled: result.autoStartEnabled,
       startupView: result.startupView,
       appearanceTheme: result.appearanceTheme,
       interfaceDensity: result.interfaceDensity,
@@ -256,7 +273,12 @@ class _TagTagHomeState extends State<TagTagHome> {
     final floatingTargetEnabled = await _applyFloatingDropTarget(
       result.floatingDropTargetEnabled,
     );
+    final autoStartApplied = await _closeBehavior.setAutoStart(
+      result.autoStartEnabled,
+    );
     unawaited(_closeBehavior.setCloseToTray(result.closeToTray));
+    final autoStartFailed =
+        autoStartApplied == false && result.autoStartEnabled;
     if (mounted) {
       setState(() {
         _appearanceTheme = result.appearanceTheme;
@@ -268,10 +290,14 @@ class _TagTagHomeState extends State<TagTagHome> {
             ? '设置已保存，但新的 Quick Tag 快捷键已被占用，继续使用原快捷键。'
             : floatingTargetEnabled == false && result.floatingDropTargetEnabled
             ? '设置已保存，但悬浮接收目标未能启动。'
+            : autoStartFailed
+            ? '设置已保存，但开机自动启动未能写入。'
             : '设置已保存。',
         error:
             shortcutRegistered == false ||
-            floatingTargetEnabled == false && result.floatingDropTargetEnabled,
+            floatingTargetEnabled == false &&
+                result.floatingDropTargetEnabled ||
+            autoStartFailed,
       );
     }
   }
@@ -305,6 +331,40 @@ class _TagTagHomeState extends State<TagTagHome> {
   Future<void> _addTagToResource(TagResource resource) async {
     controller.selectResource(resource.id);
     await _showQuickTag();
+  }
+
+  Future<void> _editTagsForResource(TagResource resource) async {
+    controller.selectResource(resource.id);
+    final result = await showPrototypeDialog<PrototypeQuickTagResult>(
+      context: _dialogContext,
+      builder: (context) => PrototypeQuickTagDialog(
+        controller: controller,
+        editResourceId: resource.id,
+      ),
+    );
+    if (result == null) {
+      return;
+    }
+    final currentIds = controller
+        .assignmentsForResource(resource.id)
+        .map((placement) => placement.id)
+        .toSet();
+    final added = result.placementIds.difference(currentIds);
+    final removed = currentIds.difference(result.placementIds);
+    if (added.isEmpty && removed.isEmpty) {
+      return;
+    }
+    await _runAction(() async {
+      for (final placementId in added) {
+        await controller.assignPlacementToSelection(
+          placementId,
+          inheritChildren: result.inheritChildren,
+        );
+      }
+      for (final placementId in removed) {
+        await controller.removePlacementAssignment(resource.id, placementId);
+      }
+    }, successMessage: '已更新“${resource.name}”的标签。');
   }
 
   Future<void> _clearTagsForResource(TagResource resource) async {
@@ -667,9 +727,12 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
 
     var importedCount = 0;
+    final differentiated = <(TagResource, String)>[];
     try {
-      for (final source in sources) {
-        await controller.importManagedResource(
+      // The dialog result carries the final source list: entries removed
+      // inside the dialog must not be imported.
+      for (final source in result.sources) {
+        final imported = await controller.importManagedResource(
           source: source,
           targetDirectory: result.targetDirectory,
           mode: result.mode,
@@ -677,9 +740,30 @@ class _TagTagHomeState extends State<TagTagHome> {
           targetName: result.renamedSources[source.path],
         );
         importedCount += 1;
+        final original =
+            result.renamedSources[source.path] ?? path.basename(source.path);
+        if (imported.name != original) {
+          differentiated.add((imported, original));
+        }
       }
       if (mounted) {
-        _showMessage('已导入 $importedCount 个资源。');
+        if (differentiated.isNotEmpty) {
+          final first = differentiated.first;
+          final extra = differentiated.length > 1
+              ? ' 等 ${differentiated.length} 项'
+              : '';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('已自动区分重名：${first.$2} → ${first.$1.name}$extra'),
+              action: SnackBarAction(
+                label: '重命名',
+                onPressed: () => unawaited(_renameResource(first.$1)),
+              ),
+            ),
+          );
+        } else {
+          _showMessage('已导入 $importedCount 个资源。');
+        }
       }
     } catch (error) {
       if (mounted) {

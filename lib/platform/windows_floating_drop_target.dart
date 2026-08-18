@@ -9,8 +9,9 @@ class WindowsFloatingDropTarget {
   WindowsFloatingDropTarget({MethodChannel? channel})
     : _channel = channel ?? _defaultChannel;
 
-  static const _defaultChannel =
-      MethodChannel('tagtag/windows_floating_drop_target');
+  static const _defaultChannel = MethodChannel(
+    'tagtag/windows_floating_drop_target',
+  );
 
   final MethodChannel _channel;
   FloatingDropTargetPositionHandler? _onSavePosition;
@@ -27,10 +28,7 @@ class WindowsFloatingDropTarget {
 
   Future<bool?> setPosition(double x, double y) async {
     try {
-      return await _channel.invokeMethod<bool>('setPosition', {
-        'x': x,
-        'y': y,
-      });
+      return await _channel.invokeMethod<bool>('setPosition', {'x': x, 'y': y});
     } on MissingPluginException {
       return null;
     } on PlatformException {

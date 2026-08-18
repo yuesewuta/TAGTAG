@@ -45,6 +45,8 @@ class FlutterWindow : public Win32Window {
   void HandleTrayCommand(HWND window, UINT command);
   bool SetFloatingDropTargetEnabled(bool enabled);
   bool SetQuickTagShortcut(UINT modifiers, UINT virtual_key);
+  bool SetAutoStart(bool enabled);
+  bool IsAutoStart() const;
   bool CreateFloatingDropTarget();
   void DestroyFloatingDropTarget();
   void ShowFloatingDropTarget();

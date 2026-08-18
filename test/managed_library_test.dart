@@ -116,6 +116,198 @@ void main() {
     },
   );
 
+  test('same-name copy imports auto-rename with a numeric suffix', () async {
+    final sandbox = await Directory.systemTemp.createTemp(
+      'tagtag-import-rename-',
+    );
+    addTearDown(() => sandbox.delete(recursive: true));
+    final root = Directory('${sandbox.path}/library');
+    final first = File('${sandbox.path}/one/report.txt');
+    await first.create(recursive: true);
+    await first.writeAsString('first bytes');
+    final second = File('${sandbox.path}/two/report.txt');
+    await second.create(recursive: true);
+    await second.writeAsString('second bytes');
+    final third = File('${sandbox.path}/three/report.txt');
+    await third.create(recursive: true);
+    await third.writeAsString('third bytes');
+    final library = await ManagedLibrary.initialize(root);
+    addTearDown(library.close);
+
+    final base = await library.importResource(
+      source: first,
+      targetDirectory: 'inbox',
+    );
+    final renamed = await library.importResource(
+      source: second,
+      targetDirectory: 'inbox',
+    );
+    final renamedAgain = await library.importResource(
+      source: third,
+      targetDirectory: 'inbox',
+    );
+
+    expect(base.relativePath, 'inbox/report.txt');
+    expect(renamed.name, 'report (2).txt');
+    expect(renamed.relativePath, 'inbox/report (2).txt');
+    expect(renamedAgain.relativePath, 'inbox/report (3).txt');
+    expect(
+      await File('${root.path}/inbox/report.txt').readAsString(),
+      'first bytes',
+    );
+    expect(
+      await File('${root.path}/inbox/report (2).txt').readAsString(),
+      'second bytes',
+    );
+    expect(
+      await File('${root.path}/inbox/report (3).txt').readAsString(),
+      'third bytes',
+    );
+    // Copy mode leaves every source untouched.
+    expect(await second.readAsString(), 'second bytes');
+    expect(await third.readAsString(), 'third bytes');
+    expect((await library.listResources()), hasLength(3));
+    expect(await library.scanConsistency(), isEmpty);
+  });
+
+  test(
+    'same-name move imports auto-rename and still remove the source',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-move-rename-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      final first = File('${sandbox.path}/move-a.txt');
+      await first.writeAsString('managed version');
+      await library.importResource(
+        source: first,
+        targetDirectory: '',
+        mode: ImportMode.move,
+      );
+      final second = File('${sandbox.path}/move-b.txt');
+      await second.writeAsString('incoming version');
+
+      final renamed = await library.importResource(
+        source: second,
+        targetDirectory: '',
+        mode: ImportMode.move,
+        targetName: 'move-a.txt',
+      );
+
+      expect(renamed.name, 'move-a (2).txt');
+      expect(await second.exists(), isFalse);
+      expect(
+        await File('${root.path}/move-a.txt').readAsString(),
+        'managed version',
+      );
+      expect(
+        await File('${root.path}/move-a (2).txt').readAsString(),
+        'incoming version',
+      );
+      expect((await library.listResources()), hasLength(2));
+      expect(await library.scanConsistency(), isEmpty);
+    },
+  );
+
+  test(
+    'same-name folder imports auto-rename keeping the full folder name',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-folder-rename-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      Future<Directory> makeFolder(String parent, String bytes) async {
+        final folder = Directory('${sandbox.path}/$parent/photo.backup');
+        await Directory('${folder.path}/nested').create(recursive: true);
+        await File('${folder.path}/nested/note.txt').writeAsString(bytes);
+        return folder;
+      }
+
+      final first = await makeFolder('one', 'first');
+      final second = await makeFolder('two', 'second');
+      await library.importResource(source: first, targetDirectory: 'media');
+
+      final renamed = await library.importResource(
+        source: second,
+        targetDirectory: 'media',
+      );
+
+      // Folders do not split an "extension": the suffix appends to the
+      // whole folder name.
+      expect(renamed.name, 'photo.backup (2)');
+      expect(renamed.relativePath, 'media/photo.backup (2)');
+      expect(
+        await File(
+          '${root.path}/media/photo.backup/nested/note.txt',
+        ).readAsString(),
+        'first',
+      );
+      expect(
+        await File(
+          '${root.path}/media/photo.backup (2)/nested/note.txt',
+        ).readAsString(),
+        'second',
+      );
+      expect(await library.scanConsistency(), isEmpty);
+    },
+  );
+
+  test(
+    'expectedImportName resolves free names, suffix gaps and batch claims',
+    () async {
+      final sandbox = await Directory.systemTemp.createTemp(
+        'tagtag-expected-name-',
+      );
+      addTearDown(() => sandbox.delete(recursive: true));
+      final root = Directory('${sandbox.path}/library');
+      final library = await ManagedLibrary.initialize(root);
+      addTearDown(library.close);
+      await Directory('${root.path}/inbox').create(recursive: true);
+      await File('${root.path}/inbox/report.txt').writeAsString('taken');
+      await File('${root.path}/inbox/report (2).txt').writeAsString('taken');
+      await Directory('${root.path}/inbox/data').create();
+
+      // Free names pass through unchanged.
+      expect(await library.expectedImportName('inbox', 'free.txt'), 'free.txt');
+      // Occupied names take the first free suffix, skipping existing gaps.
+      expect(
+        await library.expectedImportName('inbox', 'report.txt'),
+        'report (3).txt',
+      );
+      // Extension-less and dotfile-style names get a plain suffix.
+      expect(await library.expectedImportName('inbox', 'data'), 'data (2)');
+      // Folders never split an extension, and batch claims reserve names so
+      // a preview matches the sequential import results.
+      expect(
+        await library.expectedImportName(
+          'inbox',
+          'archive.tar',
+          isFolder: true,
+        ),
+        'archive.tar',
+      );
+      expect(
+        await library.expectedImportName(
+          'inbox',
+          'report.txt',
+          extraOccupiedNames: {'report (3).txt'},
+        ),
+        'report (4).txt',
+      );
+      // Names with separators are rejected exactly like import target names.
+      expect(
+        () => library.expectedImportName('inbox', 'nested/name.txt'),
+        throwsArgumentError,
+      );
+    },
+  );
+
   test('undoing a copy import removes only the managed copy', () async {
     final sandbox = await Directory.systemTemp.createTemp('tagtag-undo-copy-');
     addTearDown(() => sandbox.delete(recursive: true));

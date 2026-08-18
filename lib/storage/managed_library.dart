@@ -24,6 +24,7 @@ enum ManagedOperationType {
   externalMoveAccept,
   externalMoveRestore,
   organizeMove,
+  rename,
 }
 
 enum ConsistencyFindingType { untracked, missing }
@@ -157,7 +158,7 @@ class ManagedLibrary {
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
-  static const _schemaVersion = 7;
+  static const _schemaVersion = 8;
   static const _tagStateMetadataKey = 'tag_state_json';
   static const _preferencesMetadataKey = 'preferences_json';
 
@@ -279,6 +280,8 @@ class ManagedLibrary {
     required String targetDirectory,
     ImportMode mode = ImportMode.copy,
     String? targetName,
+    List<String> tagNames = const [],
+    DateTime? importDate,
   }) async {
     final sourceType = await FileSystemEntity.type(source.absolute.path);
     if (sourceType == FileSystemEntityType.notFound) {
@@ -289,23 +292,21 @@ class ManagedLibrary {
       throw UnsupportedError('只支持导入普通文件或文件夹');
     }
     final importName = targetName ?? path.basename(source.path);
-    if (importName.trim().isEmpty ||
-        importName == '.' ||
-        importName == '..' ||
-        path.basename(importName) != importName) {
-      throw ArgumentError.value(
-        targetName,
-        'targetName',
-        '导入名称必须是不含路径分隔符的普通名称',
-      );
-    }
+    _validateImportName(importName);
     final relativeDirectory = _normalizeRelativeDirectory(targetDirectory);
-    final relativePath = path.posix.join(relativeDirectory, importName);
+    // A same-name conflict in the target directory is differentiated with
+    // the first assigned tag, then the import date, then a numeric suffix;
+    // TAGTAG never overwrites.
+    final resolvedName = await expectedImportName(
+      relativeDirectory,
+      importName,
+      isFolder: sourceType == FileSystemEntityType.directory,
+      tagNames: tagNames,
+      importDate: importDate,
+    );
+    _validateImportName(resolvedName);
+    final relativePath = path.posix.join(relativeDirectory, resolvedName);
     final destinationPath = _absolutePath(relativePath);
-    if (await FileSystemEntity.type(destinationPath) !=
-        FileSystemEntityType.notFound) {
-      throw FileSystemException('目标位置已存在同名资源，TAGTAG 不会覆盖', destinationPath);
-    }
 
     await Directory(path.dirname(destinationPath)).create(recursive: true);
     await _copyEntity(source.path, destinationPath, sourceType);
@@ -315,7 +316,7 @@ class ManagedLibrary {
       final now = DateTime.now().toUtc();
       final resource = ManagedResource(
         id: newId('resource'),
-        name: importName,
+        name: resolvedName,
         relativePath: relativePath,
         kind: sourceType == FileSystemEntityType.file
             ? ManagedResourceKind.file
@@ -386,6 +387,71 @@ class ManagedLibrary {
         await _deleteEntity(destinationPath, sourceType);
       }
       rethrow;
+    }
+  }
+
+  /// Returns the name an import of [desiredName] into [targetDirectory]
+  /// would actually receive. A free name is used as-is; a conflict is
+  /// differentiated with the first assigned tag name (`name-品牌.ext`),
+  /// then the import date (`name-08-18.ext`), then a Windows-style numeric
+  /// suffix (`name (2).ext`; folders keep their full name). Pass the names
+  /// already claimed by earlier sources of the same batch via
+  /// [extraOccupiedNames] so a preview resolves exactly like the real
+  /// sequential imports would. TAGTAG never overwrites.
+  Future<String> expectedImportName(
+    String targetDirectory,
+    String desiredName, {
+    bool isFolder = false,
+    List<String> tagNames = const [],
+    DateTime? importDate,
+    Set<String>? extraOccupiedNames,
+  }) async {
+    _validateImportName(desiredName);
+    final relativeDirectory = _normalizeRelativeDirectory(targetDirectory);
+    final occupied = {
+      for (final name in extraOccupiedNames ?? const <String>{})
+        name.toLowerCase(),
+    };
+    Future<bool> isFree(String candidate) async {
+      if (occupied.contains(candidate.toLowerCase())) return false;
+      return await FileSystemEntity.type(
+            _absolutePath(path.posix.join(relativeDirectory, candidate)),
+          ) ==
+          FileSystemEntityType.notFound;
+    }
+
+    if (await isFree(desiredName)) {
+      return desiredName;
+    }
+    if (tagNames.isNotEmpty) {
+      final tagged = _suffixName(
+        desiredName,
+        '-${tagNames.first}',
+        isFolder: isFolder,
+      );
+      if (await isFree(tagged)) {
+        return tagged;
+      }
+    }
+    if (importDate != null) {
+      String two(int unit) => unit.toString().padLeft(2, '0');
+      final label = '${two(importDate.month)}-${two(importDate.day)}';
+      final dated = _suffixName(desiredName, '-$label', isFolder: isFolder);
+      if (await isFree(dated)) {
+        return dated;
+      }
+    }
+    var index = 2;
+    while (true) {
+      final candidate = _numericSuffixName(
+        desiredName,
+        index,
+        isFolder: isFolder,
+      );
+      if (await isFree(candidate)) {
+        return candidate;
+      }
+      index += 1;
     }
   }
 
@@ -613,6 +679,7 @@ class ManagedLibrary {
               'external_move_restore' =>
                 ManagedOperationType.externalMoveRestore,
               'organize_move' => ManagedOperationType.organizeMove,
+              'rename' => ManagedOperationType.rename,
               final value => throw FormatException('未知操作类型: $value'),
             },
             resourceId: row['resource_id'] as String,
@@ -1571,6 +1638,134 @@ class ManagedLibrary {
     }
   }
 
+  /// Renames a managed resource in place within the storage root. The
+  /// database path (including nested managed children for folders) is
+  /// updated in the same transaction; an occupied target is never
+  /// overwritten.
+  Future<ManagedOperation> renameResource(
+    String resourceId,
+    String newName,
+  ) async {
+    _validateImportName(newName);
+    final cleanName = newName.trim();
+    final resources = await listResources();
+    final matches = resources.where((resource) => resource.id == resourceId);
+    if (matches.isEmpty) {
+      throw ArgumentError.value(resourceId, 'resourceId', '找不到受管资源');
+    }
+    final resource = matches.single;
+    if (resource.status == ManagedResourceStatus.missing) {
+      throw StateError('受管资源已缺失，无法重命名');
+    }
+    if (cleanName == resource.name) {
+      throw StateError('名称未发生变化');
+    }
+    final parentDirectory = path.posix.dirname(resource.relativePath);
+    final nextRelativePath = parentDirectory == '.'
+        ? cleanName
+        : path.posix.join(parentDirectory, cleanName);
+    if (resources.any(
+      (other) =>
+          other.id != resource.id && other.relativePath == nextRelativePath,
+    )) {
+      throw StateError('目标名称已被其他受管资源占用');
+    }
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final managedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(managedPath) != type) {
+      throw FileSystemException('受管资源已缺失，无法重命名', managedPath);
+    }
+    final destinationPath = _absolutePath(nextRelativePath);
+    if (await FileSystemEntity.type(destinationPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('目标位置已存在同名资源，TAGTAG 不会覆盖', destinationPath);
+    }
+    final nested = resources
+        .where(
+          (other) =>
+              other.id != resource.id &&
+              path.posix.isWithin(resource.relativePath, other.relativePath),
+        )
+        .toList();
+
+    final operation = ManagedOperation(
+      id: newId('operation'),
+      type: ManagedOperationType.rename,
+      resourceId: resource.id,
+      sourcePath: managedPath,
+      destinationRelativePath: nextRelativePath,
+      createdAt: DateTime.now().toUtc(),
+      undoneAt: null,
+      contextJson: jsonEncode({'previousRelativePath': resource.relativePath}),
+    );
+    await _copyEntity(managedPath, destinationPath, type);
+    var transactionActive = false;
+    try {
+      final stat = await FileStat.stat(destinationPath);
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        '''
+          INSERT INTO operations(
+            id, type, resource_id, source_path,
+            destination_relative_path, created_at, undone_at, context_json
+          ) VALUES (?, 'rename', ?, ?, ?, ?, NULL, ?)
+        ''',
+        [
+          operation.id,
+          operation.resourceId,
+          operation.sourcePath,
+          operation.destinationRelativePath,
+          operation.createdAt.toIso8601String(),
+          operation.contextJson,
+        ],
+      );
+      _database.execute(
+        '''
+          UPDATE resources
+          SET name = ?, relative_path = ?, status = 'managed',
+              size_bytes = ?, modified_at = ?
+          WHERE id = ?
+        ''',
+        [
+          cleanName,
+          nextRelativePath,
+          type == FileSystemEntityType.file ? stat.size : null,
+          stat.modified.toUtc().toIso8601String(),
+          resource.id,
+        ],
+      );
+      for (final item in nested) {
+        _database
+            .execute('UPDATE resources SET relative_path = ? WHERE id = ?', [
+              nextRelativePath +
+                  item.relativePath.substring(resource.relativePath.length),
+              item.id,
+            ]);
+      }
+      await _deleteEntity(managedPath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+      return operation;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(managedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(destinationPath) == type) {
+        await _copyEntity(destinationPath, managedPath, type);
+      }
+      if (await FileSystemEntity.type(destinationPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(destinationPath, type);
+      }
+      rethrow;
+    }
+  }
+
   Future<void> undo(String operationId, {RecycleBinGateway? recycleBin}) async {
     final matches = (await listOperations()).where(
       (operation) => operation.id == operationId,
@@ -1612,6 +1807,10 @@ class ManagedLibrary {
     }
     if (operation.type == ManagedOperationType.organizeMove) {
       await _undoOrganizeMove(operation);
+      return;
+    }
+    if (operation.type == ManagedOperationType.rename) {
+      await _undoRename(operation);
       return;
     }
     if (operation.type == ManagedOperationType.importMove &&
@@ -1970,6 +2169,90 @@ class ManagedLibrary {
       if (await FileSystemEntity.type(candidatePath) !=
           FileSystemEntityType.notFound) {
         await _deleteEntity(candidatePath, expectedType);
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _undoRename(ManagedOperation operation) async {
+    final context = operation.contextJson == null
+        ? const <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(operation.contextJson!) as Map);
+    final previousRelativePath = context['previousRelativePath'] as String?;
+    if (previousRelativePath == null || previousRelativePath.isEmpty) {
+      throw const FormatException('重命名操作缺少原路径上下文');
+    }
+    final resources = await listResources();
+    final matches = resources.where(
+      (resource) => resource.id == operation.resourceId,
+    );
+    if (matches.isEmpty) {
+      throw StateError('重命名对应的资源记录已不存在');
+    }
+    final resource = matches.single;
+    if (resource.relativePath != operation.destinationRelativePath) {
+      throw StateError('资源记录已再次变更，无法撤销重命名');
+    }
+    final type = resource.kind == ManagedResourceKind.file
+        ? FileSystemEntityType.file
+        : FileSystemEntityType.directory;
+    final renamedPath = _absolutePath(resource.relativePath);
+    if (await FileSystemEntity.type(renamedPath) != type) {
+      throw FileSystemException('重命名后的资源已缺失，无法撤销', renamedPath);
+    }
+    final previousPath = _absolutePath(previousRelativePath);
+    if (await FileSystemEntity.type(previousPath) !=
+        FileSystemEntityType.notFound) {
+      throw FileSystemException('原名称已被占用，TAGTAG 不会覆盖', previousPath);
+    }
+    final nested = resources
+        .where(
+          (other) =>
+              other.id != resource.id &&
+              path.posix.isWithin(resource.relativePath, other.relativePath),
+        )
+        .toList();
+
+    await _copyEntity(renamedPath, previousPath, type);
+    var transactionActive = false;
+    try {
+      _database.execute('BEGIN IMMEDIATE');
+      transactionActive = true;
+      _database.execute(
+        'UPDATE resources SET name = ?, relative_path = ? WHERE id = ?',
+        [
+          path.posix.basename(previousRelativePath),
+          previousRelativePath,
+          resource.id,
+        ],
+      );
+      for (final item in nested) {
+        _database
+            .execute('UPDATE resources SET relative_path = ? WHERE id = ?', [
+              previousRelativePath +
+                  item.relativePath.substring(resource.relativePath.length),
+              item.id,
+            ]);
+      }
+      _database.execute('UPDATE operations SET undone_at = ? WHERE id = ?', [
+        DateTime.now().toUtc().toIso8601String(),
+        operation.id,
+      ]);
+      await _deleteEntity(renamedPath, type);
+      _database.execute('COMMIT');
+      transactionActive = false;
+    } catch (_) {
+      if (transactionActive) {
+        _database.execute('ROLLBACK');
+      }
+      if (await FileSystemEntity.type(renamedPath) ==
+              FileSystemEntityType.notFound &&
+          await FileSystemEntity.type(previousPath) == type) {
+        await _copyEntity(previousPath, renamedPath, type);
+      }
+      if (await FileSystemEntity.type(previousPath) !=
+          FileSystemEntityType.notFound) {
+        await _deleteEntity(previousPath, type);
       }
       rethrow;
     }
@@ -2548,6 +2831,42 @@ class ManagedLibrary {
     return normalized;
   }
 
+  static void _validateImportName(String name) {
+    if (name.trim().isEmpty ||
+        name == '.' ||
+        name == '..' ||
+        path.basename(name) != name) {
+      throw ArgumentError.value(name, 'targetName', '导入名称必须是不含路径分隔符的普通名称');
+    }
+  }
+
+  /// Windows Explorer conflict rename: the suffix goes before the last
+  /// extension for files (`name (2).ext`); folders and extension-less names
+  /// simply get it appended (`name (2)`).
+  static String _numericSuffixName(
+    String name,
+    int index, {
+    required bool isFolder,
+  }) {
+    final dot = isFolder ? -1 : name.lastIndexOf('.');
+    if (dot <= 0) {
+      return '$name ($index)';
+    }
+    return '${name.substring(0, dot)} ($index)${name.substring(dot)}';
+  }
+
+  static String _suffixName(
+    String name,
+    String suffix, {
+    required bool isFolder,
+  }) {
+    final dot = isFolder ? -1 : name.lastIndexOf('.');
+    if (dot <= 0) {
+      return '$name$suffix';
+    }
+    return '${name.substring(0, dot)}$suffix${name.substring(dot)}';
+  }
+
   static Future<void> _copyEntity(
     String sourcePath,
     String destinationPath,
@@ -2716,6 +3035,8 @@ class ManagedLibrary {
           _migrateV5ToV6(database);
         case 6:
           _migrateV6ToV7(database);
+        case 7:
+          _migrateV7ToV8(database);
         case _schemaVersion:
           _createSchema(database);
         default:
@@ -2811,6 +3132,18 @@ class ManagedLibrary {
     database.execute('DROP TABLE operations_v6');
   }
 
+  static void _migrateV7ToV8(Database database) {
+    database.execute('ALTER TABLE operations RENAME TO operations_v7');
+    _createOperationsTable(database);
+    database.execute(
+      "INSERT INTO operations(id, type, resource_id, source_path, "
+      "destination_relative_path, created_at, undone_at, context_json) "
+      "SELECT id, type, resource_id, source_path, destination_relative_path, "
+      "created_at, undone_at, context_json FROM operations_v7",
+    );
+    database.execute('DROP TABLE operations_v7');
+  }
+
   static void _createSchema(Database database) {
     database.execute('''
       CREATE TABLE IF NOT EXISTS metadata (
@@ -2852,7 +3185,7 @@ class ManagedLibrary {
             'import_copy', 'import_move', 'exit_restore',
             'exit_move', 'exit_recycle', 'takeover',
             'untracked_move_out', 'external_move_accept',
-            'external_move_restore', 'organize_move'
+            'external_move_restore', 'organize_move', 'rename'
           )
         ),
         resource_id TEXT NOT NULL,

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -395,6 +396,34 @@ void main() {
     await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
     expect(fixture.controller.searchMinimumSizeBytes, isNull);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('resource rows expose a right-click menu with rename', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1440, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    await tester.tapAt(
+      tester.getCenter(find.text('竞品对照.xlsx')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
+
+    for (final label in ['打开', '在资源管理器中定位', '添加新标签', '重命名…']) {
+      expect(find.text(label), findsWidgets, reason: label);
+    }
+    expect(find.text('恢复先前路径并退出管理'), findsOneWidget);
+    expect(find.text('移入回收站并退出'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
