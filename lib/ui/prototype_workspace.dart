@@ -785,6 +785,7 @@ class _SpaceMenuState extends State<_SpaceMenu> {
         ),
       },
       child: PopupMenuButton<String>(
+        popUpAnimationStyle: quickPopupAnimationStyle,
         key: _menuKey,
         tooltip: '切换标签空间',
         onSelected: (id) {
@@ -813,9 +814,7 @@ class _SpaceMenuState extends State<_SpaceMenu> {
                     width: 9,
                     height: 9,
                     decoration: BoxDecoration(
-                      color: space.id == active?.id
-                          ? TagTagColors.purple
-                          : TagTagColors.success,
+                      color: _spaceColor(space.id),
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -879,7 +878,9 @@ class _SpaceMenuState extends State<_SpaceMenu> {
                 width: 9,
                 height: 9,
                 decoration: BoxDecoration(
-                  color: TagTagColors.purple,
+                  color: active == null
+                      ? TagTagColors.purple
+                      : _spaceColor(active.id),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -1233,6 +1234,7 @@ class _MainWorkspace extends StatelessWidget {
                   ),
                 ),
                 PopupMenuButton<_ImportMenuAction>(
+                  popUpAnimationStyle: quickPopupAnimationStyle,
                   tooltip: '导入',
                   onSelected: (action) => unawaited(
                     action == _ImportMenuAction.files
@@ -1767,6 +1769,7 @@ class _ResourceTableRowState extends State<_ResourceTableRow> {
                       width: 34,
                       height: 29,
                       child: PopupMenuButton<_ResourceMenuAction>(
+                        popUpAnimationStyle: quickPopupAnimationStyle,
                         tooltip: '更多操作',
                         padding: EdgeInsets.zero,
                         icon: const Icon(Icons.more_horiz, size: 18),
@@ -2422,7 +2425,13 @@ class _TagWorkbenchState extends State<_TagWorkbench> {
         if (mounted) controller.selectPlacement(active.id);
       });
     }
-    final tree = _TagTreePanel(controller: controller, selected: active);
+    final tree = _TagTreePanel(
+      controller: controller,
+      selected: active,
+      onCreateTag: widget.onCreateTag,
+      onEditTag: widget.onEditTag,
+      onDeleteTag: widget.onDeleteTag,
+    );
     if (widget.windowWidth < 720) return tree;
     return Row(
       children: [
@@ -2455,10 +2464,19 @@ class _TagWorkbenchState extends State<_TagWorkbench> {
 }
 
 class _TagTreePanel extends StatefulWidget {
-  const _TagTreePanel({required this.controller, required this.selected});
+  const _TagTreePanel({
+    required this.controller,
+    required this.selected,
+    required this.onCreateTag,
+    required this.onEditTag,
+    required this.onDeleteTag,
+  });
 
   final TagTagController controller;
   final TagPlacement? selected;
+  final Future<void> Function(String? parentId) onCreateTag;
+  final Future<void> Function(String placementId) onEditTag;
+  final Future<void> Function(String placementId) onDeleteTag;
 
   @override
   State<_TagTreePanel> createState() => _TagTreePanelState();
@@ -2634,68 +2652,96 @@ class _TagTreePanelState extends State<_TagTreePanel> {
             ),
           ),
           Expanded(
-            child: ListView(
-              padding: const EdgeInsets.all(8),
-              children: [
-                for (final root in controller.rootPlacements)
-                  _TagTreeNode(
-                    controller: controller,
-                    placement: root,
-                    depth: 0,
-                    expandedIds: expanded,
-                    maxIndentDepth: _maxIndentDepth,
-                    duplicateNames: duplicateNames,
-                    onToggle: (id) => setState(() {
-                      if (!_expandedIds.remove(id)) {
-                        _expandedIds.add(id);
-                      }
-                    }),
-                    onDrop: (dragged, target) => _dropOn(dragged, target.id),
-                    onDragStateChange: (id) => setState(() => _draggingId = id),
-                  ),
-                if (_draggingId != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: DragTarget<TagPlacement>(
-                      onWillAcceptWithDetails: (details) =>
-                          details.data.parentId != null,
-                      onAcceptWithDetails: (details) =>
-                          _dropOn(details.data, null),
-                      builder: (context, candidates, rejected) {
-                        final highlighted = candidates.isNotEmpty;
-                        return Container(
-                          height: 40,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: highlighted
-                                ? palette.primarySoft
-                                : Colors.transparent,
-                            border: Border.all(
-                              color: highlighted
-                                  ? palette.primary
-                                  : palette.border,
-                            ),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            '拖到此处设为顶层',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: highlighted
-                                  ? palette.primary
-                                  : palette.textFaint,
-                            ),
-                          ),
-                        );
-                      },
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onSecondaryTapUp: (details) =>
+                  unawaited(_showTagBlankMenu(context, details.globalPosition)),
+              child: ListView(
+                padding: const EdgeInsets.all(8),
+                children: [
+                  for (final root in controller.rootPlacements)
+                    _TagTreeNode(
+                      controller: controller,
+                      placement: root,
+                      depth: 0,
+                      expandedIds: expanded,
+                      maxIndentDepth: _maxIndentDepth,
+                      duplicateNames: duplicateNames,
+                      onToggle: (id) => setState(() {
+                        if (!_expandedIds.remove(id)) {
+                          _expandedIds.add(id);
+                        }
+                      }),
+                      onDrop: (dragged, target) => _dropOn(dragged, target.id),
+                      onDragStateChange: (id) =>
+                          setState(() => _draggingId = id),
+                      onCreateTag: widget.onCreateTag,
+                      onEditTag: widget.onEditTag,
+                      onDeleteTag: widget.onDeleteTag,
                     ),
-                  ),
-              ],
+                  if (_draggingId != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: DragTarget<TagPlacement>(
+                        onWillAcceptWithDetails: (details) =>
+                            details.data.parentId != null,
+                        onAcceptWithDetails: (details) =>
+                            _dropOn(details.data, null),
+                        builder: (context, candidates, rejected) {
+                          final highlighted = candidates.isNotEmpty;
+                          return Container(
+                            height: 40,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: highlighted
+                                  ? palette.primarySoft
+                                  : Colors.transparent,
+                              border: Border.all(
+                                color: highlighted
+                                    ? palette.primary
+                                    : palette.border,
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '拖到此处设为顶层',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: highlighted
+                                    ? palette.primary
+                                    : palette.textFaint,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _showTagBlankMenu(BuildContext context, Offset position) async {
+    final action = await showMenu<String>(
+      context: context,
+      popUpAnimationStyle: quickPopupAnimationStyle,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'addRoot', child: _MenuLabel(Icons.add, '新建根标签')),
+      ],
+    );
+    if (action == 'addRoot') {
+      unawaited(widget.onCreateTag(null));
+    }
   }
 }
 
@@ -2710,6 +2756,9 @@ class _TagTreeNode extends StatelessWidget {
     required this.onToggle,
     required this.onDrop,
     required this.onDragStateChange,
+    required this.onCreateTag,
+    required this.onEditTag,
+    required this.onDeleteTag,
   });
   final TagTagController controller;
   final TagPlacement placement;
@@ -2720,6 +2769,9 @@ class _TagTreeNode extends StatelessWidget {
   final ValueChanged<String> onToggle;
   final void Function(TagPlacement dragged, TagPlacement target) onDrop;
   final ValueChanged<String?> onDragStateChange;
+  final Future<void> Function(String? parentId) onCreateTag;
+  final Future<void> Function(String placementId) onEditTag;
+  final Future<void> Function(String placementId) onDeleteTag;
 
   @override
   Widget build(BuildContext context) {
@@ -2779,7 +2831,7 @@ class _TagTreeNode extends StatelessWidget {
             ),
             if (duplicateNames.contains(tag.name))
               Tooltip(
-                message: '存在同名独立标签',
+                message: '存在同名独立标签（#后四位用于区分身份）',
                 child: Container(
                   margin: const EdgeInsets.only(right: 5),
                   padding: const EdgeInsets.symmetric(
@@ -2791,7 +2843,7 @@ class _TagTreeNode extends StatelessWidget {
                     borderRadius: BorderRadius.circular(3),
                   ),
                   child: Text(
-                    '同名',
+                    '#${tag.id.substring(tag.id.length - 4)}',
                     style: TextStyle(fontSize: 9, color: palette.textFaint),
                   ),
                 ),
@@ -2806,76 +2858,81 @@ class _TagTreeNode extends StatelessWidget {
     );
     return Column(
       children: [
-        DragTarget<TagPlacement>(
-          onWillAcceptWithDetails: (details) {
-            final dragged = details.data;
-            if (dragged.id == placement.id) return false;
-            if (dragged.parentId == placement.id) return false;
-            return !_placementDescendants(
-              controller,
-              dragged.id,
-            ).contains(placement.id);
-          },
-          onAcceptWithDetails: (details) => onDrop(details.data, placement),
-          builder: (context, candidates, rejected) {
-            final highlighted = candidates.isNotEmpty;
-            return Container(
-              decoration: highlighted
-                  ? BoxDecoration(
-                      color: palette.primarySoft,
-                      border: Border.all(color: palette.primary),
-                      borderRadius: BorderRadius.circular(4),
-                    )
-                  : null,
-              child: Draggable<TagPlacement>(
-                data: placement,
-                onDragStarted: () => onDragStateChange(placement.id),
-                onDragEnd: (_) => onDragStateChange(null),
-                onDraggableCanceled: (_, _) => onDragStateChange(null),
-                feedback: Material(
-                  color: Colors.transparent,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: palette.surface,
-                      border: Border.all(color: palette.primary),
-                      borderRadius: BorderRadius.circular(6),
-                      boxShadow: const [
-                        BoxShadow(blurRadius: 12, color: Color(0x33000000)),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: BoxDecoration(
-                            color: Color(tag.colorValue),
-                            borderRadius: BorderRadius.circular(2),
+        GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onSecondaryTapUp: (details) =>
+              unawaited(_showNodeMenu(context, details.globalPosition)),
+          child: DragTarget<TagPlacement>(
+            onWillAcceptWithDetails: (details) {
+              final dragged = details.data;
+              if (dragged.id == placement.id) return false;
+              if (dragged.parentId == placement.id) return false;
+              return !_placementDescendants(
+                controller,
+                dragged.id,
+              ).contains(placement.id);
+            },
+            onAcceptWithDetails: (details) => onDrop(details.data, placement),
+            builder: (context, candidates, rejected) {
+              final highlighted = candidates.isNotEmpty;
+              return Container(
+                decoration: highlighted
+                    ? BoxDecoration(
+                        color: palette.primarySoft,
+                        border: Border.all(color: palette.primary),
+                        borderRadius: BorderRadius.circular(4),
+                      )
+                    : null,
+                child: Draggable<TagPlacement>(
+                  data: placement,
+                  onDragStarted: () => onDragStateChange(placement.id),
+                  onDragEnd: (_) => onDragStateChange(null),
+                  onDraggableCanceled: (_, _) => onDragStateChange(null),
+                  feedback: Material(
+                    color: Colors.transparent,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: palette.surface,
+                        border: Border.all(color: palette.primary),
+                        borderRadius: BorderRadius.circular(6),
+                        boxShadow: const [
+                          BoxShadow(blurRadius: 12, color: Color(0x33000000)),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: Color(tag.colorValue),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
                           ),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          tag.name,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: palette.text,
+                          const SizedBox(width: 6),
+                          Text(
+                            tag.name,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: palette.text,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
+                  childWhenDragging: Opacity(opacity: 0.35, child: row),
+                  child: row,
                 ),
-                childWhenDragging: Opacity(opacity: 0.35, child: row),
-                child: row,
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
         if (expanded)
           for (final child in children)
@@ -2889,9 +2946,70 @@ class _TagTreeNode extends StatelessWidget {
               onToggle: onToggle,
               onDrop: onDrop,
               onDragStateChange: onDragStateChange,
+              onCreateTag: onCreateTag,
+              onEditTag: onEditTag,
+              onDeleteTag: onDeleteTag,
             ),
       ],
     );
+  }
+
+  Future<void> _showNodeMenu(BuildContext context, Offset position) async {
+    controller.selectPlacement(placement.id);
+    final action = await showMenu<String>(
+      context: context,
+      popUpAnimationStyle: quickPopupAnimationStyle,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: const [
+        PopupMenuItem(value: 'addChild', child: _MenuLabel(Icons.add, '新建子标签')),
+        PopupMenuItem(
+          value: 'rename',
+          child: _MenuLabel(Icons.edit_outlined, '重命名标签'),
+        ),
+        PopupMenuItem(
+          value: 'reparent',
+          child: _MenuLabel(Icons.account_tree_outlined, '更改上级标签…'),
+        ),
+        PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'delete',
+          child: _MenuLabel(Icons.delete_outline, '删除标签'),
+        ),
+      ],
+    );
+    if (!context.mounted) return;
+    switch (action) {
+      case 'addChild':
+        unawaited(onCreateTag(placement.id));
+      case 'rename':
+        unawaited(onEditTag(placement.id));
+      case 'reparent':
+        unawaited(_reparentTag(context));
+      case 'delete':
+        unawaited(onDeleteTag(placement.id));
+    }
+  }
+
+  Future<void> _reparentTag(BuildContext context) async {
+    final updated = await showReparentTagDialog(
+      context,
+      controller: controller,
+      placement: placement,
+    );
+    if (updated == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
+          ),
+        ),
+      );
+    }
   }
 }
 
@@ -2989,6 +3107,7 @@ class _TagResultPanel extends StatelessWidget {
                 ),
               ),
               PopupMenuButton<_TagMenuAction>(
+                popUpAnimationStyle: quickPopupAnimationStyle,
                 tooltip: '标签操作',
                 icon: const Icon(Icons.more_horiz),
                 onSelected: (action) {
@@ -4313,7 +4432,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
         data: theme,
         child: AlertDialog(
           title: const Text('清空历史记录？'),
-          content: const Text('仅清除当前空间的最近使用与常用标签记录，操作日志不受影响。'),
+          content: const Text('仅清除当前空间的最近使用与常用标签记录，操作日志不受影响'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
@@ -4842,6 +4961,7 @@ Future<void> _showResourceContextMenu(
 }) async {
   controller.selectResource(resource.id);
   final action = await showMenu<_ResourceMenuAction>(
+    popUpAnimationStyle: quickPopupAnimationStyle,
     context: context,
     position: RelativeRect.fromLTRB(
       position.dx,
@@ -4885,6 +5005,24 @@ enum _TagMenuAction {
   split,
   organize,
   delete,
+}
+
+/// Deterministic per-space accent color so the switcher and menu reflect
+/// the active space identity.
+Color _spaceColor(String spaceId) {
+  const colors = [
+    Color(0xff7654b5),
+    Color(0xff1f7a55),
+    Color(0xff285cc4),
+    Color(0xffb65d18),
+    Color(0xffc43b43),
+    Color(0xff0369a1),
+  ];
+  var hash = 0;
+  for (final unit in spaceId.codeUnits) {
+    hash = (hash * 31 + unit) & 0x7fffffff;
+  }
+  return colors[hash % colors.length];
 }
 
 class _Palette {
@@ -5638,6 +5776,7 @@ class _LogFilterMenu<T> extends StatelessWidget {
         currentColor != null ||
         entries.indexWhere((entry) => entry.label == currentLabel) > 0;
     return PopupMenuButton<int>(
+      popUpAnimationStyle: quickPopupAnimationStyle,
       tooltip: currentLabel,
       onSelected: (index) => onSelected(entries[index].value),
       itemBuilder: (context) => [

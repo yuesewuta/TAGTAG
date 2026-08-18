@@ -335,7 +335,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('应用'));
     await tester.pumpAndSettle();
-    expect(find.text('同名'), findsWidgets);
+    expect(find.textContaining(RegExp(r'#\w{4}')), findsWidgets);
 
     await tester.tap(find.text('设计'));
     await tester.pumpAndSettle();
@@ -424,6 +424,49 @@ void main() {
     }
     expect(find.text('恢复先前路径并退出管理'), findsOneWidget);
     expect(find.text('移入回收站并退出'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('tag tree nodes and blank area expose context menus', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final fixture = await _createFixture(tester);
+    addTearDown(() => fixture.sandbox.delete(recursive: true));
+    fixture.controller.showTagHierarchy();
+
+    await _pumpWorkspace(tester, fixture.controller);
+
+    // Node menu.
+    await tester.tapAt(
+      tester.getCenter(find.text('设计')),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
+    for (final label in ['新建子标签', '重命名标签', '更改上级标签…', '删除标签']) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+    expect(
+      fixture.controller.activePlacementId,
+      'place-project-design',
+      reason: 'right-click selects the tag first',
+    );
+    await tester.tapAt(const Offset(8, 700));
+    await tester.pumpAndSettle();
+
+    // Blank-area menu offers creating a root tag.
+    final tree = find.byType(ListView).first;
+    await tester.tapAt(
+      tester.getBottomLeft(tree) + const Offset(30, -30),
+      buttons: kSecondaryButton,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('新建根标签'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.pumpWidget(const SizedBox.shrink());

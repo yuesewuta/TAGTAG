@@ -20,6 +20,13 @@ abstract final class TagTagColors {
   static const textFaint = Color(0xff7a8492);
 }
 
+/// Snappier than the 300ms Material default; menus feel instant.
+const quickPopupAnimationStyle = AnimationStyle(
+  duration: Duration(milliseconds: 120),
+  reverseDuration: Duration(milliseconds: 90),
+  curve: Curves.easeOutCubic,
+);
+
 ThemeData buildTagTagTheme({Brightness brightness = Brightness.light}) {
   final dark = brightness == Brightness.dark;
   final primary = dark ? const Color(0xff7da6ff) : TagTagColors.primary;

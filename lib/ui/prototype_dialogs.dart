@@ -648,6 +648,7 @@ class _ImportMain extends StatelessWidget {
           _ImportSection(
             label: '来源',
             action: PopupMenuButton<_ImportReselectKind>(
+              popUpAnimationStyle: quickPopupAnimationStyle,
               tooltip: '重新选择',
               onSelected: (kind) => unawaited(
                 kind == _ImportReselectKind.files
@@ -2365,45 +2366,37 @@ class _RenameResourceDialogState extends State<_RenameResourceDialog> {
     return '${name.substring(0, dot)}$suffix${name.substring(dot)}';
   }
 
-  void _applyChip(String Function(String current) transform) {
-    final text = _nameController.text.trim();
-    if (text.isEmpty) return;
+  int _indexCounter = 1;
+
+  // Quick chips always compose from the ORIGINAL name, so each chip picks
+  // its suffix kind instead of stacking onto whatever the field holds.
+  void _applySuffix(String suffix) {
     setState(() {
       _error = null;
-      _nameController.text = transform(text);
+      _nameController.text = _withSuffix(widget.resource.name, suffix);
     });
   }
 
   void _addDateSuffix() {
     final now = DateTime.now();
     String two(int unit) => unit.toString().padLeft(2, '0');
-    final label = '${two(now.month)}-${two(now.day)}';
-    _applyChip(
-      (current) => current.contains('-$label')
-          ? current
-          : _withSuffix(current, '-$label'),
-    );
+    _applySuffix('-${two(now.month)}-${two(now.day)}');
   }
 
   void _addTagSuffix() {
     final tagName = _firstTagName;
     if (tagName.isEmpty) return;
-    _applyChip(
-      (current) => current.contains('-$tagName')
-          ? current
-          : _withSuffix(current, '-$tagName'),
-    );
+    _applySuffix('-$tagName');
   }
 
   void _addIndexSuffix() {
-    _applyChip((current) {
-      final pattern = RegExp(r'^(.*) \((\d+)\)(\..*)?$');
-      final match = pattern.firstMatch(current);
-      if (match != null) {
-        final next = int.parse(match.group(2)!) + 1;
-        return '${match.group(1)} ($next)${match.group(3) ?? ''}';
-      }
-      return _withSuffix(current, ' (2)');
+    setState(() {
+      _indexCounter += 1;
+      _error = null;
+      _nameController.text = _withSuffix(
+        widget.resource.name,
+        ' ($_indexCounter)',
+      );
     });
   }
 

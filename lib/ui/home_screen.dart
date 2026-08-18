@@ -214,7 +214,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       resource: resource,
     );
     if (renamed == true && mounted) {
-      _showMessage('已重命名资源。');
+      _showMessage('已重命名资源');
     }
   }
 
@@ -305,7 +305,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   Future<void> _revealStorageRoot() async {
     final root = controller.storageRoot;
     if (root == null) {
-      _showMessage('存储根尚未初始化。', error: true);
+      _showMessage('存储根尚未初始化', error: true);
       return;
     }
     try {
@@ -438,7 +438,7 @@ class _TagTagHomeState extends State<TagTagHome> {
             cleanName == '.' ||
             cleanName == '..' ||
             path.basename(cleanName) != cleanName) {
-          _showMessage('请输入不包含路径分隔符的有效名称。', error: true);
+          _showMessage('请输入不包含路径分隔符的有效名称', error: true);
           continue;
         }
         destinationPath = path.join(selectedDirectory, cleanName);
@@ -493,7 +493,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           ? visible.first
           : (all.isEmpty ? null : all.first);
       if (fallback == null) {
-        _showMessage('资料库中还没有可标注的资源。');
+        _showMessage('资料库中还没有可标注的资源');
         return;
       }
       controller.selectResource(fallback.id);
@@ -522,7 +522,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     );
     if (mounted) setState(() => _quickTagRegistered = registered);
     if (mounted && registered == false) {
-      _showMessage('全局 Quick Tag 未能注册。Ctrl+Shift+T 可能已被其他程序占用。', error: true);
+      _showMessage('全局 Quick Tag 未能注册。Ctrl+Shift+T 可能已被其他程序占用', error: true);
     }
   }
 
@@ -530,7 +530,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     final enabled = controller.preferences.floatingDropTargetEnabled;
     final applied = await _applyFloatingDropTarget(enabled);
     if (mounted && enabled && applied == false) {
-      _showMessage('悬浮接收目标未能启动。', error: true);
+      _showMessage('悬浮接收目标未能启动', error: true);
     }
   }
 
@@ -546,7 +546,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   Future<void> _handleGlobalQuickTag(List<String> externalPaths) async {
     if (_importDialogOpen || _restoringBackup) {
       if (mounted && externalPaths.isNotEmpty) {
-        _showMessage('当前操作尚未完成，请稍后再次使用 Explorer 右键添加标签。', error: true);
+        _showMessage('当前操作尚未完成，请稍后再次使用 Explorer 右键添加标签', error: true);
       }
       return;
     }
@@ -578,7 +578,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     if (sources.isEmpty) {
       if (mounted) {
-        _showMessage('Explorer 所选资源已不存在，无法添加标签。', error: true);
+        _showMessage('Explorer 所选资源已不存在，无法添加标签', error: true);
       }
       return;
     }
@@ -615,7 +615,7 @@ class _TagTagHomeState extends State<TagTagHome> {
 
   Future<void> _restoreSelectedToOriginalPath() async {
     if (controller.selectedResourceIds.length != 1) {
-      _showMessage('恢复先前路径时一次只能选择一个资源。');
+      _showMessage('恢复先前路径时一次只能选择一个资源');
       return;
     }
     final resourceId = controller.selectedResourceIds.single;
@@ -682,7 +682,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       return;
     }
     if (controller.activeSpaceId == null) {
-      _showMessage('请先创建一个标签空间。', error: true);
+      _showMessage('请先创建一个标签空间', error: true);
       return;
     }
     final managedIds = <String>[];
@@ -697,7 +697,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     if (managedIds.isNotEmpty) {
       if (managedIds.length != sources.length) {
-        _showMessage('请将已受管资源与外部资源分开处理。', error: true);
+        _showMessage('请将已受管资源与外部资源分开处理', error: true);
         return;
       }
       controller.clearSelection();
@@ -762,7 +762,7 @@ class _TagTagHomeState extends State<TagTagHome> {
             ),
           );
         } else {
-          _showMessage('已导入 $importedCount 个资源。');
+          _showMessage('已导入 $importedCount 个资源');
         }
       }
     } catch (error) {
@@ -841,7 +841,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         )
         .toList();
     if (targets.isEmpty) {
-      _showMessage('当前空间没有可作为合并目标的其他标签实体。', error: true);
+      _showMessage('当前空间没有可作为合并目标的其他标签实体', error: true);
       return;
     }
     final targetTagId = await showPrototypeDialog<String>(
@@ -870,7 +870,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         .where((item) => item.tagId == tag.id)
         .toList();
     if (placements.length < 2) {
-      _showMessage('该标签实体只有一个位置，无需拆分。', error: true);
+      _showMessage('该标签实体只有一个位置，无需拆分', error: true);
       return;
     }
     final draft = await showPrototypeDialog<_SplitTagDraft>(
@@ -992,7 +992,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         Directory(targetPath),
       );
       if (mounted) {
-        _showMessage('完整备份恢复成功。');
+        _showMessage('完整备份恢复成功');
       }
     } catch (error) {
       if (mounted) {
@@ -1005,7 +1005,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   Future<void> _exportSpaceArchive(SpaceArchiveKind kind) async {
     final activeSpace = controller.activeSpace;
     if (activeSpace == null) {
-      _showMessage('请先创建或选择标签空间。', error: true);
+      _showMessage('请先创建或选择标签空间', error: true);
       return;
     }
     final isPackage = kind == SpaceArchiveKind.package;
@@ -1084,7 +1084,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     if (isPackage) {
       final root = controller.storageRoot;
       if (root == null) {
-        _showMessage('存储根尚未初始化。', error: true);
+        _showMessage('存储根尚未初始化', error: true);
         return;
       }
       final selectedTarget = await getDirectoryPath(
@@ -1099,7 +1099,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       final normalizedTarget = path.normalize(selectedTarget);
       if (!path.equals(normalizedRoot, normalizedTarget) &&
           !path.isWithin(normalizedRoot, normalizedTarget)) {
-        _showMessage('空间包资源必须导入到存储根目录内。', error: true);
+        _showMessage('空间包资源必须导入到存储根目录内', error: true);
         return;
       }
       targetDirectory = path.equals(normalizedRoot, normalizedTarget)
@@ -1134,7 +1134,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         targetDirectory: targetDirectory,
       );
       if (mounted) {
-        _showMessage(isPackage ? '空间包导入成功。' : '已从模板新建空间。');
+        _showMessage(isPackage ? '空间包导入成功' : '已从模板新建空间');
       }
     } catch (error) {
       if (mounted) {
