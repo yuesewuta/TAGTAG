@@ -11,6 +11,7 @@ import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
 import 'prototype_dialogs.dart';
 import 'glass.dart';
+import 'app_toast.dart';
 import 'tagtag_theme.dart';
 
 typedef ResourceAction = Future<void> Function(TagResource resource);
@@ -25,21 +26,13 @@ Duration _motionDuration(BuildContext context, int milliseconds) {
       : Duration(milliseconds: milliseconds);
 }
 
-/// Shows the prototype's success toast (styles.css toast: dark surface,
-/// green check, 2600ms). Colors come from snackBarTheme in tagtag_theme.
-void showPrototypeToast(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Row(
-        children: [
-          const Icon(Icons.check_circle, size: 17, color: Color(0xff80d2a5)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(message)),
-        ],
-      ),
-      duration: const Duration(milliseconds: 2600),
-    ),
-  );
+/// Shows a compact top-of-page toast (see app_toast.dart).
+void showPrototypeToast(
+  BuildContext context,
+  String message, {
+  bool isError = false,
+}) {
+  AppToast.show(message, isError: isError);
 }
 
 class PrototypeWorkspace extends StatefulWidget {
@@ -379,6 +372,7 @@ class _PrototypeWorkspaceState extends State<PrototypeWorkspace>
                         ),
                         if (widget.dragging)
                           _DropOverlay(count: widget.draggingCount),
+                        const AppToastOverlay(),
                       ],
                     );
                   },
@@ -2501,9 +2495,7 @@ class _TagTreePanelState extends State<_TagTreePanel> {
         error,
       ) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('调整标签层级失败：$error')));
+          showPrototypeToast(context, '调整标签层级失败：$error', isError: true);
         }
       }),
     );
@@ -2511,9 +2503,7 @@ class _TagTreePanelState extends State<_TagTreePanel> {
       if (newParentId != null) _expandedIds.add(newParentId);
     });
     widget.controller.selectPlacement(dragged.id);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已更新：${widget.controller.pathOf(dragged.id)}')),
-    );
+    showPrototypeToast(context, '已更新：${widget.controller.pathOf(dragged.id)}');
   }
 
   void _expandToLevels(int levels) {
@@ -3002,12 +2992,9 @@ class _TagTreeNode extends StatelessWidget {
       placement: placement,
     );
     if (updated == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
-          ),
-        ),
+      showPrototypeToast(
+        context,
+        '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
       );
     }
   }
@@ -3325,14 +3312,11 @@ class _TagResultPanel extends StatelessWidget {
     final pinned = controller.isPlacementPinned(placement.id);
     await controller.togglePlacementPinned(placement.id);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            pinned
-                ? '已取消固定“${controller.tagForPlacement(placement).name}”'
-                : '已把“${controller.tagForPlacement(placement).name}”固定到常用标签',
-          ),
-        ),
+      showPrototypeToast(
+        context,
+        pinned
+            ? '已取消固定“${controller.tagForPlacement(placement).name}”'
+            : '已把“${controller.tagForPlacement(placement).name}”固定到常用标签',
       );
     }
   }
@@ -3341,14 +3325,11 @@ class _TagResultPanel extends StatelessWidget {
     final hidden = controller.isPlacementHidden(placement.id);
     await controller.togglePlacementHidden(placement.id);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            hidden
-                ? '已取消隐藏“${controller.tagForPlacement(placement).name}”'
-                : '已从常用标签隐藏“${controller.tagForPlacement(placement).name}”',
-          ),
-        ),
+      showPrototypeToast(
+        context,
+        hidden
+            ? '已取消隐藏“${controller.tagForPlacement(placement).name}”'
+            : '已从常用标签隐藏“${controller.tagForPlacement(placement).name}”',
       );
     }
   }
@@ -3361,15 +3342,11 @@ class _TagResultPanel extends StatelessWidget {
     try {
       await controller.setTagNamePolicy(tag.id, policy);
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('已更新“${tag.name}”的同名策略')));
+        showPrototypeToast(context, '已更新“${tag.name}”的同名策略');
       }
     } catch (error) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('更新同名策略失败：$error')));
+        showPrototypeToast(context, '更新同名策略失败：$error', isError: true);
       }
     }
   }
@@ -3381,17 +3358,18 @@ class _TagResultPanel extends StatelessWidget {
       placement: placement,
     );
     if (updated == true && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
-          ),
-        ),
+      showPrototypeToast(
+        context,
+        '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
       );
     }
   }
 
   Future<void> _organize(BuildContext context, TagPlacement placement) async {
+    final beforeOperations = (await controller.listOperations())
+        .map((operation) => operation.id)
+        .toSet();
+    if (!context.mounted) return;
     final summary = await showOrganizePreviewDialog(
       context,
       controller: controller,
@@ -3401,12 +3379,24 @@ class _TagResultPanel extends StatelessWidget {
       final skipped = summary.skippedConflictCount > 0
           ? '，跳过 ${summary.skippedConflictCount} 个冲突'
           : '';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            '已整理 ${summary.movedCount} 个资源到“${summary.targetDirectory}”$skipped',
-          ),
-        ),
+      final newOperations = (await controller.listOperations())
+          .where(
+            (operation) =>
+                !beforeOperations.contains(operation.id) &&
+                operation.undoneAt == null,
+          )
+          .map((operation) => operation.id)
+          .toList();
+      AppToast.show(
+        '已整理 ${summary.movedCount} 个资源到“${summary.targetDirectory}”$skipped',
+        actionLabel: newOperations.isEmpty ? null : '撤销',
+        onAction: newOperations.isEmpty
+            ? null
+            : () async {
+                for (final id in newOperations.reversed) {
+                  await controller.undoOperation(id);
+                }
+              },
       );
     }
   }
@@ -3494,15 +3484,11 @@ class _SearchFilterStrip extends StatelessWidget {
     try {
       final saved = await controller.saveCurrentSearch(name);
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('已保存查询“${saved.name}”')));
+        showPrototypeToast(context, '已保存查询“${saved.name}”');
       }
     } on ArgumentError {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('查询名称不能为空')));
+        showPrototypeToast(context, '查询名称不能为空', isError: true);
       }
     }
   }
@@ -4451,9 +4437,7 @@ class _HistoryPanelState extends State<_HistoryPanel> {
     }
     await widget.controller.clearUsageHistory();
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已清空当前空间的历史记录')));
+      showPrototypeToast(context, '已清空当前空间的历史记录');
     }
   }
 }

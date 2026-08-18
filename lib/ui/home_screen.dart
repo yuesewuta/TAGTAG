@@ -15,6 +15,7 @@ import '../platform/windows_quick_tag_hotkey.dart';
 import '../services/space_portability.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
+import 'app_toast.dart';
 import 'glass.dart';
 import 'prototype_dialogs.dart';
 import 'prototype_workspace.dart';
@@ -208,13 +209,37 @@ class _TagTagHomeState extends State<TagTagHome> {
   }
 
   Future<void> _renameResource(TagResource resource) async {
+    final beforeOperations = (await controller.listOperations())
+        .map((operation) => operation.id)
+        .toSet();
+    if (!mounted) return;
     final renamed = await showRenameResourceDialog(
       _dialogContext,
       controller: controller,
       resource: resource,
     );
     if (renamed == true && mounted) {
-      _showMessage('已重命名资源');
+      final newOperations = (await controller.listOperations())
+          .where(
+            (operation) =>
+                !beforeOperations.contains(operation.id) &&
+                operation.undoneAt == null,
+          )
+          .map((operation) => operation.id)
+          .toList();
+      if (newOperations.isEmpty) {
+        _showMessage('已重命名资源');
+      } else {
+        AppToast.show(
+          '已重命名资源',
+          actionLabel: '撤销',
+          onAction: () async {
+            for (final id in newOperations.reversed) {
+              await controller.undoOperation(id);
+            }
+          },
+        );
+      }
     }
   }
 
@@ -364,7 +389,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       for (final placementId in removed) {
         await controller.removePlacementAssignment(resource.id, placementId);
       }
-    }, successMessage: '已更新“${resource.name}”的标签。');
+    }, successMessage: '已更新“${resource.name}”的标签');
   }
 
   Future<void> _clearTagsForResource(TagResource resource) async {
@@ -464,7 +489,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           resource.id,
           destinationPath,
         );
-      }, successMessage: '已移动到指定位置并退出 TAGTAG 管理。');
+      }, successMessage: '已移动到指定位置并退出 TAGTAG 管理');
       return;
     }
   }
@@ -482,7 +507,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     await _runAction(() async {
       await controller.recycleResource(resource.id);
-    }, successMessage: '已移入 Windows 回收站并退出 TAGTAG 管理。');
+    }, successMessage: '已移入 Windows 回收站并退出 TAGTAG 管理');
   }
 
   Future<void> _showQuickTag() async {
@@ -512,7 +537,7 @@ class _TagTagHomeState extends State<TagTagHome> {
           inheritChildren: result.inheritChildren,
         );
       }
-    }, successMessage: '已添加 ${result.placementIds.length} 个标签。');
+    }, successMessage: '已添加 ${result.placementIds.length} 个标签');
   }
 
   Future<void> _configureGlobalQuickTag() async {
@@ -609,7 +634,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     await _runAction(
       controller.clearSelectedTags,
-      successMessage: '已清除所选资源的直接标签。',
+      successMessage: '已清除所选资源的直接标签',
     );
   }
 
@@ -634,7 +659,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     await _runAction(() async {
       await controller.restoreResourceToOriginalPath(resourceId);
-    }, successMessage: '已恢复到先前路径并退出 TAGTAG 管理。');
+    }, successMessage: '已恢复到先前路径并退出 TAGTAG 管理');
   }
 
   Future<void> _showCreateSpace() async {
@@ -727,6 +752,9 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
 
     var importedCount = 0;
+    final beforeOperations = (await controller.listOperations())
+        .map((operation) => operation.id)
+        .toSet();
     final differentiated = <(TagResource, String)>[];
     try {
       // The dialog result carries the final source list: entries removed
@@ -752,17 +780,33 @@ class _TagTagHomeState extends State<TagTagHome> {
           final extra = differentiated.length > 1
               ? ' 等 ${differentiated.length} 项'
               : '';
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('已自动区分重名：${first.$2} → ${first.$1.name}$extra'),
-              action: SnackBarAction(
-                label: '重命名',
-                onPressed: () => unawaited(_renameResource(first.$1)),
-              ),
-            ),
+          AppToast.show(
+            '已自动区分重名：${first.$2} → ${first.$1.name}$extra',
+            actionLabel: '重命名',
+            onAction: () => _renameResource(first.$1),
           );
         } else {
-          _showMessage('已导入 $importedCount 个资源');
+          final newOperations = (await controller.listOperations())
+              .where(
+                (operation) =>
+                    !beforeOperations.contains(operation.id) &&
+                    operation.undoneAt == null,
+              )
+              .map((operation) => operation.id)
+              .toList();
+          if (newOperations.isEmpty) {
+            _showMessage('已导入 $importedCount 个资源');
+          } else {
+            AppToast.show(
+              '已导入 $importedCount 个资源',
+              actionLabel: '撤销',
+              onAction: () async {
+                for (final id in newOperations.reversed) {
+                  await controller.undoOperation(id);
+                }
+              },
+            );
+          }
         }
       }
     } catch (error) {
@@ -797,7 +841,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         parentId: parentId,
         reuseTagId: result.reuseTagId,
       ),
-      successMessage: result.reuseTagId == null ? '已创建标签。' : '已复用已有标签实体。',
+      successMessage: result.reuseTagId == null ? '已创建标签' : '已复用已有标签实体。',
     );
   }
 
@@ -827,7 +871,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         name: result.name,
         colorValue: result.colorValue,
       ),
-      successMessage: '已更新标签实体；所有复用位置同步显示。',
+      successMessage: '已更新标签实体；所有复用位置同步显示',
     );
   }
 
@@ -855,12 +899,16 @@ class _TagTagHomeState extends State<TagTagHome> {
     if (targetTagId == null) {
       return;
     }
-    await _runAction(() async {
-      await controller.mergeTags(
-        targetTagId: targetTagId,
-        sourceTagIds: {sourceTag.id},
-      );
-    }, successMessage: '标签实体已合并。');
+    await _runAction(
+      () async {
+        await controller.mergeTags(
+          targetTagId: targetTagId,
+          sourceTagIds: {sourceTag.id},
+        );
+      },
+      successMessage: '标签实体已合并',
+      undoable: true,
+    );
   }
 
   Future<void> _showSplitTag(String placementId) async {
@@ -885,12 +933,16 @@ class _TagTagHomeState extends State<TagTagHome> {
     if (draft == null) {
       return;
     }
-    await _runAction(() async {
-      await controller.splitTagPlacements(
-        placementIds: draft.placementIds,
-        newName: draft.name,
-      );
-    }, successMessage: '所选位置已拆分为独立标签实体。');
+    await _runAction(
+      () async {
+        await controller.splitTagPlacements(
+          placementIds: draft.placementIds,
+          newName: draft.name,
+        );
+      },
+      successMessage: '所选位置已拆分为独立标签实体',
+      undoable: true,
+    );
   }
 
   Future<void> _deleteActiveTag() async {
@@ -916,7 +968,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       }
       await _runAction(
         () => controller.deleteTagEntity(tag.id),
-        successMessage: '已删除标签实体；失去标签的资源已进入待整理区。',
+        successMessage: '已删除标签实体；失去标签的资源已进入待整理区',
       );
       return;
     }
@@ -931,7 +983,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
     await _runAction(
       () => controller.deletePlacement(placementId),
-      successMessage: '已删除标签位置。',
+      successMessage: '已删除标签位置',
     );
   }
 
@@ -1182,12 +1234,57 @@ class _TagTagHomeState extends State<TagTagHome> {
   Future<void> _runAction(
     Future<void> Function() action, {
     required String successMessage,
+    bool undoable = false,
   }) async {
+    Set<String>? beforeOperations;
+    Set<String>? beforeTagOperations;
+    if (undoable) {
+      beforeOperations = (await controller.listOperations())
+          .map((operation) => operation.id)
+          .toSet();
+      beforeTagOperations = controller.tagOperations
+          .map((operation) => operation.id)
+          .toSet();
+    }
     try {
       await action();
-      if (mounted) {
-        _showMessage(successMessage);
+      if (!mounted) return;
+      if (undoable) {
+        final newOperations = (await controller.listOperations())
+            .where(
+              (operation) =>
+                  !beforeOperations!.contains(operation.id) &&
+                  operation.undoneAt == null,
+            )
+            .map((operation) => operation.id)
+            .toList();
+        final newTagOperations = controller.tagOperations
+            .where(
+              (operation) =>
+                  !beforeTagOperations!.contains(operation.id) &&
+                  operation.undoneAt == null &&
+                  (operation.type == TagDomainOperationType.merge ||
+                      operation.type == TagDomainOperationType.split),
+            )
+            .map((operation) => operation.id)
+            .toList();
+        if (newOperations.isNotEmpty || newTagOperations.isNotEmpty) {
+          AppToast.show(
+            successMessage,
+            actionLabel: '撤销',
+            onAction: () async {
+              for (final id in newTagOperations.reversed) {
+                await controller.undoTagOperation(id);
+              }
+              for (final id in newOperations.reversed) {
+                await controller.undoOperation(id);
+              }
+            },
+          );
+          return;
+        }
       }
+      _showMessage(successMessage);
     } catch (error) {
       if (mounted) {
         _showMessage('$error', error: true);
@@ -1242,27 +1339,7 @@ class _TagTagHomeState extends State<TagTagHome> {
   }
 
   void _showMessage(String message, {bool error = false}) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          backgroundColor: error ? Theme.of(context).colorScheme.error : null,
-          duration: const Duration(milliseconds: 2600),
-          content: error
-              ? Text(message)
-              : Row(
-                  children: [
-                    const Icon(
-                      Icons.check_circle,
-                      size: 17,
-                      color: Color(0xff80d2a5),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(message)),
-                  ],
-                ),
-        ),
-      );
+    AppToast.show(message, isError: error);
   }
 }
 
