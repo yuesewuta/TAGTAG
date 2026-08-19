@@ -651,3 +651,11 @@
 - UI 接线：`showPrototypeToast` 支持 actionLabel/onAction 透传；workspace 新增操作差集捕获与撤销 Toast 助手，接入拖拽改层级、结果面板与树节点更改上级、固定/隐藏/同名策略；home_screen 的 `_runAction` 撤销过滤器放开到全部类型，新建/编辑/删除标签流程开启 undoable。
 - 测试：新增 test/tag_operation_undo_test.dart 11 个（各类型撤销往返、复用实体创建、持久化重载后连续撤销、重复撤销报错、无上下文旧记录拒绝、JSON 向后兼容）。
 - 最终门禁：分析 0 问题，全量测试 173/173（基线 162 + 新增 11），Windows Release 构建成功；full-undo 两个工单与 map 均已 resolved。未做 git 提交。
+
+## 会话：2026-08-19（定期备份 + 首次启动向导）
+
+- 按 .scratch/scheduled-backup-wizard/spec.md 已确认设计实施两个特性。
+- 定期备份：UserPreferences 新增 backupEnabled/backupDirectory/backupIntervalHours（默认 24）/backupIncremental/lastBackupAt（fromJson 宽容，非法值抛 FormatException）；updatePreferences 记录变更（lastBackupAt 由调度器盖章，沿用 floatingTargetX/Y 先例不进设置日志）。新服务 lib/services/scheduled_backup.dart 提供纯函数 validateBackupDirectory（规范化后拒绝等于/位于/祖先于存储根）与 isBackupDue（可注入时钟）。ManagedLibrary 新增 createIncrementalBackup：固定 TAGTAG-incremental 子目录，每次刷新 SQLite 在线快照（先清理旧 WAL sidecar）+ manifest（formatVersion 1 / strategy incremental），按 size+mtime 对比仅复制新增或变化文件（文件夹递归逐文件），远端多余文件绝不删除，损坏 manifest 降级全量重拷；完整策略复用 createBackup 写入新时间戳目录。调度在 home_screen：15 分钟周期 Timer + 启动检查，执行前盖章 lastBackupAt，结果经新 API controller.recordScheduledBackupOutcome 写统一日志（resource 类，成功 info/失败 warning），全程不阻塞 UI。设置→存储与备份新增：定期备份开关、备份目录选择（内联校验，保存时校验可创建性，非法则留在对话框）、间隔下拉（6/12/24/72 小时）、策略分段（完整/增量）、上次备份时间行。
+- 首次启动向导：main.dart 初始化页扩展为两步 _LibrarySetupWizard（仅未初始化安装出现）。第 1 步存储根（原行为，初始化后挂起 _pendingLibrary），第 2 步关键设置：外观（实时预览主题）、默认导入方式、Quick Tag 快捷键（仅展示）、悬浮接收目标、开机自动启动；液态玻璃风格（GlassCanvas/GlassPanel/GlassPrimaryButton）。完成经 updatePreferences 持久化并立即应用原生自启动与悬浮目标——新抽取 lib/services/windows_integration_sync.dart 的 applyWindowsIntegrationPreferences，home_screen 启动同步重构复用同一助手。
+- 测试：新增 test/scheduled_backup_test.dart 19 个域测试（目录校验 6、到期逻辑 6、偏好往返/兼容/非法 3、设置日志 1、增量仅复制变化且绝不删除远端 2、目标位置守卫 1）与 test/backup_wizard_ui_test.dart 2 个 widget 测试（设置备份行含校验拦截与保存、向导从存储根到设置到完成全流程并断言库 metadata 持久化）。
+- 最终门禁：analyze 0 问题，全量测试 194/194（基线 173 + 新增 21），Windows Release 构建成功；scheduled-backup-wizard 三个工单与 map 均已 resolved。未做 git 提交。

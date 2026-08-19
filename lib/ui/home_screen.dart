@@ -12,7 +12,9 @@ import '../platform/windows_close_behavior.dart';
 import '../platform/windows_file_actions.dart';
 import '../platform/windows_floating_drop_target.dart';
 import '../platform/windows_quick_tag_hotkey.dart';
+import '../services/scheduled_backup.dart';
 import '../services/space_portability.dart';
+import '../services/windows_integration_sync.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
 import 'app_toast.dart';
@@ -61,6 +63,8 @@ class _TagTagHomeState extends State<TagTagHome> {
   bool? _quickTagRegistered;
   List<ConsistencyFinding> _consistencyFindings = const [];
   Timer? _consistencyTimer;
+  Timer? _backupTimer;
+  bool _backupRunning = false;
 
   TagTagController get controller => widget.controller;
 
@@ -87,11 +91,8 @@ class _TagTagHomeState extends State<TagTagHome> {
     unawaited(
       _closeBehavior.setCloseToTray(controller.preferences.closeToTray),
     );
-    unawaited(
-      _closeBehavior.setAutoStart(controller.preferences.autoStartEnabled),
-    );
     unawaited(_configureGlobalQuickTag());
-    unawaited(_configureFloatingDropTarget());
+    unawaited(_configureWindowsIntegration());
     if (widget.initialExternalQuickTagPaths.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -106,6 +107,11 @@ class _TagTagHomeState extends State<TagTagHome> {
       const Duration(seconds: 15),
       (_) => unawaited(_scanConsistency()),
     );
+    unawaited(_runScheduledBackupIfDue());
+    _backupTimer = Timer.periodic(
+      const Duration(minutes: 15),
+      (_) => unawaited(_runScheduledBackupIfDue()),
+    );
   }
 
   @override
@@ -113,6 +119,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     _searchController.dispose();
     _searchFocusNode.dispose();
     _consistencyTimer?.cancel();
+    _backupTimer?.cancel();
     unawaited(_quickTagHotkey.dispose());
     unawaited(_floatingDropTarget.dispose());
     super.dispose();
@@ -291,6 +298,10 @@ class _TagTagHomeState extends State<TagTagHome> {
       interfaceDensity: result.interfaceDensity,
       uniqueTagNames: result.uniqueTagNames,
       namingTemplate: result.namingTemplate,
+      backupEnabled: result.backupEnabled,
+      backupDirectory: result.backupDirectory,
+      backupIntervalHours: result.backupIntervalHours,
+      backupIncremental: result.backupIncremental,
       quickTagShortcut: shortcutRegistered == false
           ? controller.preferences.quickTagShortcut
           : result.quickTagShortcut,
@@ -551,9 +562,13 @@ class _TagTagHomeState extends State<TagTagHome> {
     }
   }
 
-  Future<void> _configureFloatingDropTarget() async {
+  Future<void> _configureWindowsIntegration() async {
     final enabled = controller.preferences.floatingDropTargetEnabled;
-    final applied = await _applyFloatingDropTarget(enabled);
+    final applied = await applyWindowsIntegrationPreferences(
+      preferences: controller.preferences,
+      closeBehavior: _closeBehavior,
+      floatingDropTarget: _floatingDropTarget,
+    );
     if (mounted && enabled && applied == false) {
       _showMessage('悬浮接收目标未能启动', error: true);
     }
@@ -1006,6 +1021,71 @@ class _TagTagHomeState extends State<TagTagHome> {
       }
     } catch (error) {
       _showMessage('备份失败：$error', error: true);
+    }
+  }
+
+  /// Scheduled-backup check: runs at startup and every 15 minutes while the
+  /// app is open. Never blocks the UI; outcomes go to the unified log
+  /// (resource category). lastBackupAt is stamped on attempt so a failing
+  /// destination does not log a warning every 15 minutes.
+  Future<void> _runScheduledBackupIfDue() async {
+    if (_backupRunning) {
+      return;
+    }
+    final preferences = controller.preferences;
+    if (!preferences.backupEnabled || controller.library == null) {
+      return;
+    }
+    if (!isBackupDue(
+      now: DateTime.now(),
+      lastBackupAt: preferences.lastBackupAt,
+      intervalHours: preferences.backupIntervalHours,
+    )) {
+      return;
+    }
+    final root = controller.storageRoot;
+    if (root == null) {
+      return;
+    }
+    final validationError = validateBackupDirectory(
+      directory: preferences.backupDirectory,
+      storageRoot: root.path,
+    );
+    _backupRunning = true;
+    try {
+      await controller.updatePreferences(
+        lastBackupAt: DateTime.now().toUtc().toIso8601String(),
+      );
+      if (validationError != null) {
+        await controller.recordScheduledBackupOutcome(
+          success: false,
+          summary: '定期备份未执行：$validationError',
+        );
+        return;
+      }
+      final destination = Directory(preferences.backupDirectory);
+      if (preferences.backupIncremental) {
+        final result = await controller.createIncrementalBackup(destination);
+        await controller.recordScheduledBackupOutcome(
+          success: true,
+          summary:
+              '定期备份完成（增量）：复制 ${result.copiedFiles} 个文件，'
+              '跳过 ${result.skippedFiles} 个未变化文件',
+        );
+      } else {
+        final backup = await controller.createBackup(destination);
+        await controller.recordScheduledBackupOutcome(
+          success: true,
+          summary: '定期备份完成（完整）：${backup.path}',
+        );
+      }
+    } catch (error) {
+      await controller.recordScheduledBackupOutcome(
+        success: false,
+        summary: '定期备份失败：$error',
+      );
+    } finally {
+      _backupRunning = false;
     }
   }
 

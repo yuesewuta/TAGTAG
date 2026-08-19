@@ -222,6 +222,11 @@ class TagTagController extends ChangeNotifier {
     String? namingTemplate,
     double? floatingTargetX,
     double? floatingTargetY,
+    bool? backupEnabled,
+    String? backupDirectory,
+    int? backupIntervalHours,
+    bool? backupIncremental,
+    String? lastBackupAt,
   }) async {
     final previous = _preferences;
     _preferences = _preferences.copyWith(
@@ -237,6 +242,11 @@ class TagTagController extends ChangeNotifier {
       namingTemplate: namingTemplate,
       floatingTargetX: floatingTargetX,
       floatingTargetY: floatingTargetY,
+      backupEnabled: backupEnabled,
+      backupDirectory: backupDirectory,
+      backupIntervalHours: backupIntervalHours,
+      backupIncremental: backupIncremental,
+      lastBackupAt: lastBackupAt,
     );
     final changes = _describePreferenceChanges(previous, _preferences);
     if (changes.isNotEmpty) {
@@ -303,6 +313,23 @@ class TagTagController extends ChangeNotifier {
       changes.add(
         after.namingTemplate.trim().isEmpty ? '命名模板 已清除' : '命名模板 已更新',
       );
+    }
+    // lastBackupAt is stamped by the scheduler on every backup attempt and
+    // would spam the settings log, so it is intentionally not described here
+    // (the backup itself is logged under the resource category).
+    if (before.backupEnabled != after.backupEnabled) {
+      changes.add('定期备份 ${after.backupEnabled ? '开启' : '关闭'}');
+    }
+    if (before.backupDirectory != after.backupDirectory) {
+      changes.add(
+        after.backupDirectory.trim().isEmpty ? '备份目录 已清除' : '备份目录 已更新',
+      );
+    }
+    if (before.backupIntervalHours != after.backupIntervalHours) {
+      changes.add('备份间隔 每 ${after.backupIntervalHours} 小时');
+    }
+    if (before.backupIncremental != after.backupIncremental) {
+      changes.add('备份策略 ${after.backupIncremental ? '增量' : '完整'}');
     }
     return changes;
   }
@@ -2871,6 +2898,44 @@ class TagTagController extends ChangeNotifier {
         ).convert(_preferences.toJson()),
       },
     );
+  }
+
+  Future<IncrementalBackupResult> createIncrementalBackup(
+    Directory destinationDirectory,
+  ) async {
+    final managedLibrary = library;
+    if (managedLibrary == null) {
+      throw StateError('TAGTAG 存储根尚未初始化');
+    }
+    return managedLibrary.createIncrementalBackup(
+      destinationDirectory,
+      metadataDocuments: {
+        'tag-state.json': const JsonEncoder.withIndent(
+          '  ',
+        ).convert(_state.toJson()),
+        'preferences.json': const JsonEncoder.withIndent(
+          '  ',
+        ).convert(_preferences.toJson()),
+      },
+    );
+  }
+
+  /// Appends a scheduled-backup outcome to the unified log (resource
+  /// category): info on success, warning on failure.
+  Future<void> recordScheduledBackupOutcome({
+    required bool success,
+    required String summary,
+  }) async {
+    _state = _state.copyWith(
+      logEvents: _appendLogEvent(
+        _state.logEvents,
+        success ? LogLevel.info : LogLevel.warning,
+        LogCategory.resource,
+        summary,
+      ),
+    );
+    notifyListeners();
+    await _persistTagDomainMetadata();
   }
 
   Future<File> exportActiveSpacePackage(File destination) async {

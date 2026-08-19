@@ -113,8 +113,28 @@ class ConsistencyFinding {
   final DateTime detectedAt;
 }
 
-class BackupValidationResult {
-  const BackupValidationResult({
+class IncrementalBackupResult {
+  const IncrementalBackupResult({
+    required this.backupDirectory,
+    required this.createdAt,
+    required this.resourceCount,
+    required this.copiedFiles,
+    required this.skippedFiles,
+  });
+
+  final Directory backupDirectory;
+  final DateTime createdAt;
+  final int resourceCount;
+
+  /// Resource files copied because they were new or changed (size/mtime)
+  /// versus the previous incremental manifest.
+  final int copiedFiles;
+
+  /// Resource files left untouched because they matched the manifest.
+  final int skippedFiles;
+}
+
+class BackupValidationResult {  const BackupValidationResult({
     required this.backupDirectory,
     required this.formatVersion,
     required this.createdAt,
@@ -158,6 +178,9 @@ class ManagedLibrary {
 
   static const _metadataDirectoryName = '.tagtag';
   static const _databaseFileName = 'tagtag.sqlite';
+
+  /// Fixed subdirectory name used by incremental backups.
+  static const incrementalBackupDirectoryName = 'TAGTAG-incremental';
   static const _schemaVersion = 8;
   static const _tagStateMetadataKey = 'tag_state_json';
   static const _preferencesMetadataKey = 'preferences_json';
@@ -2543,6 +2566,242 @@ class ManagedLibrary {
     }
   }
 
+  /// Incremental backup into the fixed `TAGTAG-incremental` subdirectory of
+  /// [destinationDirectory]. Every run writes a fresh SQLite online snapshot
+  /// and a new manifest, but resource files are copied only when they are new
+  /// or changed (size + mtime versus the stored manifest). Files removed
+  /// from the library are never deleted from the backup.
+  Future<IncrementalBackupResult> createIncrementalBackup(
+    Directory destinationDirectory, {
+    Map<String, String> metadataDocuments = const {},
+  }) async {
+    final destinationRoot = Directory(
+      path.normalize(destinationDirectory.absolute.path),
+    );
+    if (path.equals(destinationRoot.path, root.path) ||
+        path.isWithin(root.path, destinationRoot.path) ||
+        path.isWithin(destinationRoot.path, root.path)) {
+      throw ArgumentError.value(
+        destinationDirectory.path,
+        'destinationDirectory',
+        '备份目录必须位于存储根之外',
+      );
+    }
+    final backupRoot = Directory(
+      path.join(destinationRoot.path, incrementalBackupDirectoryName),
+    );
+    await backupRoot.create(recursive: true);
+    final previousEntries = await _readIncrementalManifest(backupRoot);
+
+    final createdAt = DateTime.now().toUtc();
+    final metadataDirectory = Directory(
+      path.join(backupRoot.path, 'metadata'),
+    );
+    final resourcesDirectory = Directory(
+      path.join(backupRoot.path, 'resources'),
+    );
+    await metadataDirectory.create(recursive: true);
+    await resourcesDirectory.create(recursive: true);
+
+    // Fresh online snapshot on every run; drop stale files and WAL sidecars
+    // from the previous run first so the snapshot never appends to them.
+    final snapshotPath = path.join(metadataDirectory.path, _databaseFileName);
+    for (final suffix in const ['', '-wal', '-shm']) {
+      final stale = File('$snapshotPath$suffix');
+      if (await stale.exists()) {
+        await stale.delete();
+      }
+    }
+    final snapshotDatabase = sqlite3.open(snapshotPath);
+    try {
+      await _database.backup(snapshotDatabase).drain<void>();
+    } finally {
+      snapshotDatabase.close();
+    }
+    for (final entry in metadataDocuments.entries) {
+      if (entry.key == _databaseFileName ||
+          path.basename(entry.key) != entry.key ||
+          entry.key == '.' ||
+          entry.key == '..') {
+        throw ArgumentError.value(
+          entry.key,
+          'metadataDocuments',
+          '备份元数据名称必须是普通文件名且不能覆盖 SQLite 快照',
+        );
+      }
+      await File(
+        path.join(metadataDirectory.path, entry.key),
+      ).writeAsString(entry.value, flush: true);
+    }
+
+    final resources = await listResources();
+    var copiedFiles = 0;
+    var skippedFiles = 0;
+    final entries = <String, _IncrementalManifestEntry>{};
+    for (final resource in resources) {
+      final type = resource.kind == ManagedResourceKind.file
+          ? FileSystemEntityType.file
+          : FileSystemEntityType.directory;
+      final sourcePath = _absolutePath(resource.relativePath);
+      if (await FileSystemEntity.type(sourcePath) != type) {
+        throw FileSystemException('受管资源缺失，无法创建增量备份', sourcePath);
+      }
+      final backupPath = path.joinAll([
+        resourcesDirectory.path,
+        ...resource.relativePath.split('/'),
+      ]);
+      final manifestKey = 'resources/${resource.relativePath}';
+      final ({int copied, int skipped}) outcome;
+      if (type == FileSystemEntityType.directory) {
+        outcome = await _incrementalCopyDirectory(
+          sourcePath,
+          backupPath,
+          manifestKey,
+          previousEntries,
+          entries,
+        );
+      } else {
+        outcome = await _incrementalCopyFile(
+          sourcePath,
+          backupPath,
+          manifestKey,
+          previousEntries,
+          entries,
+        );
+      }
+      copiedFiles += outcome.copied;
+      skippedFiles += outcome.skipped;
+    }
+
+    final manifest = File(path.join(backupRoot.path, 'manifest.json'));
+    await manifest.writeAsString(
+      const JsonEncoder.withIndent('  ').convert({
+        'formatVersion': 1,
+        'strategy': 'incremental',
+        'createdAt': createdAt.toIso8601String(),
+        'resourceCount': resources.length,
+        'copiedFiles': copiedFiles,
+        'skippedFiles': skippedFiles,
+        'entries': {
+          for (final entry in entries.entries) entry.key: entry.value.toJson(),
+        },
+      }),
+      flush: true,
+    );
+    return IncrementalBackupResult(
+      backupDirectory: backupRoot,
+      createdAt: createdAt,
+      resourceCount: resources.length,
+      copiedFiles: copiedFiles,
+      skippedFiles: skippedFiles,
+    );
+  }
+
+  static Future<Map<String, _IncrementalManifestEntry>>
+  _readIncrementalManifest(Directory backupRoot) async {
+    final manifestFile = File(path.join(backupRoot.path, 'manifest.json'));
+    if (!await manifestFile.exists()) {
+      return const {};
+    }
+    // A missing or corrupt manifest must not fail the backup; it simply
+    // degrades to a full recopy.
+    try {
+      final decoded = jsonDecode(await manifestFile.readAsString());
+      if (decoded is! Map<String, dynamic> ||
+          decoded['strategy'] != 'incremental') {
+        return const {};
+      }
+      final entryValues = decoded['entries'];
+      if (entryValues is! Map<String, dynamic>) {
+        return const {};
+      }
+      final entries = <String, _IncrementalManifestEntry>{};
+      for (final value in entryValues.entries) {
+        final fields = value.value;
+        if (fields is Map &&
+            fields['sizeBytes'] is int &&
+            fields['modifiedAtMillis'] is int) {
+          entries[value.key] = _IncrementalManifestEntry(
+            sizeBytes: fields['sizeBytes'] as int,
+            modifiedAtMillis: fields['modifiedAtMillis'] as int,
+          );
+        }
+      }
+      return entries;
+    } on Object {
+      return const {};
+    }
+  }
+
+  Future<({int copied, int skipped})> _incrementalCopyFile(
+    String sourcePath,
+    String backupPath,
+    String manifestKey,
+    Map<String, _IncrementalManifestEntry> previousEntries,
+    Map<String, _IncrementalManifestEntry> nextEntries,
+  ) async {
+    final sourceFile = File(sourcePath);
+    final stat = await sourceFile.stat();
+    nextEntries[manifestKey] = _IncrementalManifestEntry(
+      sizeBytes: stat.size,
+      modifiedAtMillis: stat.modified.millisecondsSinceEpoch,
+    );
+    final previous = previousEntries[manifestKey];
+    if (previous != null &&
+        previous.sizeBytes == stat.size &&
+        previous.modifiedAtMillis == stat.modified.millisecondsSinceEpoch &&
+        await File(backupPath).exists()) {
+      return (copied: 0, skipped: 1);
+    }
+    await Directory(path.dirname(backupPath)).create(recursive: true);
+    await sourceFile.copy(backupPath);
+    return (copied: 1, skipped: 0);
+  }
+
+  Future<({int copied, int skipped})> _incrementalCopyDirectory(
+    String sourcePath,
+    String backupPath,
+    String manifestKey,
+    Map<String, _IncrementalManifestEntry> previousEntries,
+    Map<String, _IncrementalManifestEntry> nextEntries,
+  ) async {
+    var copied = 0;
+    var skipped = 0;
+    await Directory(backupPath).create(recursive: true);
+    await for (final child in Directory(sourcePath).list(followLinks: false)) {
+      final childType = await FileSystemEntity.type(
+        child.path,
+        followLinks: false,
+      );
+      if (childType == FileSystemEntityType.link) {
+        throw FileSystemException('文件夹中包含暂不支持的符号链接', child.path);
+      }
+      final childBackupPath = path.join(
+        backupPath,
+        path.basename(child.path),
+      );
+      final childKey = '$manifestKey/${path.basename(child.path)}';
+      final outcome = childType == FileSystemEntityType.directory
+          ? await _incrementalCopyDirectory(
+              child.path,
+              childBackupPath,
+              childKey,
+              previousEntries,
+              nextEntries,
+            )
+          : await _incrementalCopyFile(
+              child.path,
+              childBackupPath,
+              childKey,
+              previousEntries,
+              nextEntries,
+            );
+      copied += outcome.copied;
+      skipped += outcome.skipped;
+    }
+    return (copied: copied, skipped: skipped);
+  }
+
   static Future<BackupValidationResult> validateBackup(
     Directory backupDirectory,
   ) async {
@@ -3197,6 +3456,21 @@ class ManagedLibrary {
       )
     ''');
   }
+}
+
+class _IncrementalManifestEntry {
+  const _IncrementalManifestEntry({
+    required this.sizeBytes,
+    required this.modifiedAtMillis,
+  });
+
+  final int sizeBytes;
+  final int modifiedAtMillis;
+
+  Map<String, dynamic> toJson() => {
+    'sizeBytes': sizeBytes,
+    'modifiedAtMillis': modifiedAtMillis,
+  };
 }
 
 class _BackupEntry {

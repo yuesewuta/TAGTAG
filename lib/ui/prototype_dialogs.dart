@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as path;
 
 import '../models/tag_models.dart';
+import '../services/scheduled_backup.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
 import 'app_toast.dart';
@@ -1090,6 +1091,10 @@ class PrototypeSettingsResult {
     required this.quickTagShortcut,
     required this.uniqueTagNames,
     required this.namingTemplate,
+    required this.backupEnabled,
+    required this.backupDirectory,
+    required this.backupIntervalHours,
+    required this.backupIncremental,
   });
 
   final bool moveImportsByDefault;
@@ -1102,6 +1107,10 @@ class PrototypeSettingsResult {
   final String quickTagShortcut;
   final bool uniqueTagNames;
   final String namingTemplate;
+  final bool backupEnabled;
+  final String backupDirectory;
+  final int backupIntervalHours;
+  final bool backupIncremental;
 }
 
 enum PrototypeSettingsSection { general, imports, storage, windows, appearance }
@@ -1150,6 +1159,11 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
   late String _quickTagShortcut;
   late bool _uniqueTagNames;
   late final TextEditingController _namingTemplateController;
+  late bool _backupEnabled;
+  late String _backupDirectory;
+  late int _backupIntervalHours;
+  late bool _backupIncremental;
+  String? _backupDirectoryError;
   PrototypeSettingsSection _section = PrototypeSettingsSection.general;
   final FocusNode _shortcutFocusNode = FocusNode();
   bool _recording = false;
@@ -1171,6 +1185,10 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
     _namingTemplateController = TextEditingController(
       text: preferences.namingTemplate,
     );
+    _backupEnabled = preferences.backupEnabled;
+    _backupDirectory = preferences.backupDirectory;
+    _backupIntervalHours = preferences.backupIntervalHours;
+    _backupIncremental = preferences.backupIncremental;
   }
 
   @override
@@ -1229,21 +1247,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
               child: const Text('取消'),
             ),
             GlassPrimaryButton.icon(
-              onPressed: () => Navigator.pop(
-                context,
-                PrototypeSettingsResult(
-                  moveImportsByDefault: _moveImportsByDefault,
-                  floatingDropTargetEnabled: _floatingDropTargetEnabled,
-                  closeToTray: _closeToTray,
-                  autoStartEnabled: _autoStartEnabled,
-                  startupView: _startupView,
-                  appearanceTheme: _appearanceTheme,
-                  interfaceDensity: _interfaceDensity,
-                  quickTagShortcut: _quickTagShortcut,
-                  uniqueTagNames: _uniqueTagNames,
-                  namingTemplate: _namingTemplateController.text.trim(),
-                ),
-              ),
+              onPressed: () => unawaited(_save(context)),
               icon: const Icon(Icons.check, size: 17),
               label: const Text('保存设置'),
             ),
@@ -1251,6 +1255,77 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
         ),
       ),
     );
+  }
+
+  /// Validates the scheduled-backup fields (when enabled) before closing;
+  /// an invalid or uncreatable directory keeps the dialog open with an
+  /// inline error in the storage section.
+  Future<void> _save(BuildContext context) async {
+    if (_backupEnabled) {
+      final root = widget.controller.storageRoot;
+      var error = root == null
+          ? '存储根尚未初始化'
+          : validateBackupDirectory(
+              directory: _backupDirectory,
+              storageRoot: root.path,
+            );
+      if (error == null) {
+        try {
+          await Directory(_backupDirectory.trim()).create(recursive: true);
+        } on Object {
+          error = '备份目录无法创建';
+        }
+      }
+      if (error != null) {
+        setState(() {
+          _backupDirectoryError = error;
+          _section = PrototypeSettingsSection.storage;
+        });
+        return;
+      }
+    }
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.pop(
+      context,
+      PrototypeSettingsResult(
+        moveImportsByDefault: _moveImportsByDefault,
+        floatingDropTargetEnabled: _floatingDropTargetEnabled,
+        closeToTray: _closeToTray,
+        autoStartEnabled: _autoStartEnabled,
+        startupView: _startupView,
+        appearanceTheme: _appearanceTheme,
+        interfaceDensity: _interfaceDensity,
+        quickTagShortcut: _quickTagShortcut,
+        uniqueTagNames: _uniqueTagNames,
+        namingTemplate: _namingTemplateController.text.trim(),
+        backupEnabled: _backupEnabled,
+        backupDirectory: _backupDirectory.trim(),
+        backupIntervalHours: _backupIntervalHours,
+        backupIncremental: _backupIncremental,
+      ),
+    );
+  }
+
+  Future<void> _pickBackupDirectory() async {
+    final selected = await getDirectoryPath(
+      confirmButtonText: '选择备份目录',
+      canCreateDirectories: true,
+    );
+    if (selected == null) {
+      return;
+    }
+    final root = widget.controller.storageRoot;
+    setState(() {
+      _backupDirectory = selected;
+      _backupDirectoryError = root == null
+          ? '存储根尚未初始化'
+          : validateBackupDirectory(
+              directory: selected,
+              storageRoot: root.path,
+            );
+    });
   }
 
   Widget _settingsPanel(BuildContext context, bool compact) {
@@ -1492,6 +1567,88 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
             child: const Text('导入空间模板'),
           ),
         ],
+      ),
+      const SizedBox(height: 12),
+      _SettingRow(
+        title: '定期备份',
+        subtitle: '应用运行时按间隔自动备份资料库',
+        compact: compact,
+        trailing: PillSwitch(
+          value: _backupEnabled,
+          onChanged: (value) => setState(() => _backupEnabled = value),
+        ),
+      ),
+      _SettingRow(
+        title: '备份目录',
+        subtitle: _backupDirectory.trim().isEmpty ? '尚未选择' : _backupDirectory,
+        compact: compact,
+        trailing: OutlinedButton.icon(
+          onPressed: () => unawaited(_pickBackupDirectory()),
+          icon: const Icon(Icons.folder_open_outlined, size: 16),
+          label: const Text('选择目录'),
+        ),
+      ),
+      if (_backupDirectoryError != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            _backupDirectoryError!,
+            style: const TextStyle(
+              fontSize: 11,
+              color: TagTagColors.destructive,
+            ),
+          ),
+        ),
+      _SettingRow(
+        title: '备份间隔',
+        subtitle: '距离上次备份超过该时长后自动执行',
+        compact: compact,
+        trailing: Container(
+          height: 34,
+          padding: const EdgeInsets.symmetric(horizontal: 9),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: _backupIntervalHours,
+              isDense: true,
+              items: const [
+                DropdownMenuItem(value: 6, child: Text('每 6 小时')),
+                DropdownMenuItem(value: 12, child: Text('每 12 小时')),
+                DropdownMenuItem(value: 24, child: Text('每 24 小时')),
+                DropdownMenuItem(value: 72, child: Text('每 72 小时')),
+              ],
+              onChanged: (value) {
+                if (value != null) {
+                  setState(() => _backupIntervalHours = value);
+                }
+              },
+            ),
+          ),
+        ),
+      ),
+      _SettingRow(
+        title: '备份策略',
+        subtitle: '完整备份每次生成新目录；增量备份只复制新增或变化的文件',
+        compact: compact,
+        trailing: PrototypeSegmented<bool>(
+          values: const [false, true],
+          selected: _backupIncremental,
+          label: (value) => value ? '增量' : '完整',
+          onSelected: (value) => setState(() => _backupIncremental = value),
+        ),
+      ),
+      _SettingRow(
+        title: '上次备份时间',
+        subtitle: '定期备份最近一次执行的时间',
+        compact: compact,
+        trailing: Text(
+          _formatLastBackupAt(widget.controller.preferences.lastBackupAt),
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
       ),
     ];
   }
@@ -2271,6 +2428,17 @@ String _formatBytes(int bytes) {
   }
   if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
   return '$bytes B';
+}
+
+String _formatLastBackupAt(String lastBackupAt) {
+  if (lastBackupAt.isEmpty) {
+    return '从未备份';
+  }
+  final parsed = DateTime.tryParse(lastBackupAt);
+  if (parsed == null) {
+    return '从未备份';
+  }
+  return parsed.toLocal().toString().split('.').first;
 }
 
 String _joinRoot(String rootPath, String targetLabel) => targetLabel == '存储根目录'

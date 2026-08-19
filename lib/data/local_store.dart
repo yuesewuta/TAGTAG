@@ -17,6 +17,11 @@ class UserPreferences {
     this.namingTemplate = '',
     this.floatingTargetX,
     this.floatingTargetY,
+    this.backupEnabled = false,
+    this.backupDirectory = '',
+    this.backupIntervalHours = 24,
+    this.backupIncremental = false,
+    this.lastBackupAt = '',
   });
 
   final bool moveImportsByDefault;
@@ -43,6 +48,18 @@ class UserPreferences {
   final double? floatingTargetX;
   final double? floatingTargetY;
 
+  /// Scheduled backups. [backupDirectory] is an absolute path outside the
+  /// storage root; empty disables scheduling even when [backupEnabled] is
+  /// true. [backupIntervalHours] is the minimum spacing between runs.
+  /// [backupIncremental] selects the incremental strategy (fixed
+  /// `TAGTAG-incremental` directory) over timestamped full backups.
+  /// [lastBackupAt] is an ISO-8601 timestamp; empty means never attempted.
+  final bool backupEnabled;
+  final String backupDirectory;
+  final int backupIntervalHours;
+  final bool backupIncremental;
+  final String lastBackupAt;
+
   UserPreferences copyWith({
     bool? moveImportsByDefault,
     bool? floatingDropTargetEnabled,
@@ -56,6 +73,11 @@ class UserPreferences {
     String? namingTemplate,
     double? floatingTargetX,
     double? floatingTargetY,
+    bool? backupEnabled,
+    String? backupDirectory,
+    int? backupIntervalHours,
+    bool? backupIncremental,
+    String? lastBackupAt,
   }) => UserPreferences(
     moveImportsByDefault: moveImportsByDefault ?? this.moveImportsByDefault,
     floatingDropTargetEnabled:
@@ -70,6 +92,11 @@ class UserPreferences {
     namingTemplate: namingTemplate ?? this.namingTemplate,
     floatingTargetX: floatingTargetX ?? this.floatingTargetX,
     floatingTargetY: floatingTargetY ?? this.floatingTargetY,
+    backupEnabled: backupEnabled ?? this.backupEnabled,
+    backupDirectory: backupDirectory ?? this.backupDirectory,
+    backupIntervalHours: backupIntervalHours ?? this.backupIntervalHours,
+    backupIncremental: backupIncremental ?? this.backupIncremental,
+    lastBackupAt: lastBackupAt ?? this.lastBackupAt,
   );
 
   Map<String, dynamic> toJson() => {
@@ -86,6 +113,11 @@ class UserPreferences {
     'namingTemplate': namingTemplate,
     'floatingTargetX': floatingTargetX,
     'floatingTargetY': floatingTargetY,
+    'backupEnabled': backupEnabled,
+    'backupDirectory': backupDirectory,
+    'backupIntervalHours': backupIntervalHours,
+    'backupIncremental': backupIncremental,
+    'lastBackupAt': lastBackupAt,
   };
 
   factory UserPreferences.fromJson(Map<String, dynamic> json) {
@@ -98,6 +130,11 @@ class UserPreferences {
     final quickTagShortcut = json['quickTagShortcut'];
     final floatingTargetX = json['floatingTargetX'];
     final floatingTargetY = json['floatingTargetY'];
+    final backupEnabled = json['backupEnabled'];
+    final backupDirectory = json['backupDirectory'];
+    final backupIntervalHours = json['backupIntervalHours'];
+    final backupIncremental = json['backupIncremental'];
+    final lastBackupAt = json['lastBackupAt'];
     if (json['version'] != 1 ||
         json['moveImportsByDefault'] is! bool ||
         (floatingDropTargetEnabled != null &&
@@ -114,7 +151,16 @@ class UserPreferences {
         (json['uniqueTagNames'] != null && json['uniqueTagNames'] is! bool) ||
         (json['namingTemplate'] != null && json['namingTemplate'] is! String) ||
         (floatingTargetX != null && floatingTargetX is! num) ||
-        (floatingTargetY != null && floatingTargetY is! num)) {
+        (floatingTargetY != null && floatingTargetY is! num) ||
+        (backupEnabled != null && backupEnabled is! bool) ||
+        (backupDirectory != null && backupDirectory is! String) ||
+        (backupIntervalHours != null &&
+            (backupIntervalHours is! int || backupIntervalHours < 1)) ||
+        (backupIncremental != null && backupIncremental is! bool) ||
+        (lastBackupAt != null &&
+            (lastBackupAt is! String ||
+                lastBackupAt.isNotEmpty &&
+                    DateTime.tryParse(lastBackupAt) == null))) {
       throw const FormatException('TAGTAG 设置文件无效');
     }
     return UserPreferences(
@@ -130,6 +176,11 @@ class UserPreferences {
       namingTemplate: json['namingTemplate'] as String? ?? '',
       floatingTargetX: (floatingTargetX as num?)?.toDouble(),
       floatingTargetY: (floatingTargetY as num?)?.toDouble(),
+      backupEnabled: backupEnabled as bool? ?? false,
+      backupDirectory: backupDirectory as String? ?? '',
+      backupIntervalHours: backupIntervalHours as int? ?? 24,
+      backupIncremental: backupIncremental as bool? ?? false,
+      lastBackupAt: lastBackupAt as String? ?? '',
     );
   }
 }
