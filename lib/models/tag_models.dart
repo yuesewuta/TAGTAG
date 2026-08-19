@@ -14,6 +14,7 @@ enum TagDomainOperationType {
   reparent,
   pin,
   hide,
+  policy,
 }
 
 enum SearchKindFilter { all, file, folder }

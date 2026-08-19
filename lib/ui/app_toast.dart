@@ -38,10 +38,14 @@ class AppToast {
     Future<void> Function()? onAction,
     bool isError = false,
   }) {
+    // Toasts are terse labels; strip trailing full stops from any source.
+    final cleaned = message.endsWith('。')
+        ? message.substring(0, message.length - 1)
+        : message;
     _timer?.cancel();
     _current.value = AppToastData(
       id: ++_nextId,
-      message: message,
+      message: cleaned,
       actionLabel: actionLabel,
       onAction: onAction,
       isError: isError,

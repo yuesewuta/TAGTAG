@@ -31,8 +31,51 @@ void showPrototypeToast(
   BuildContext context,
   String message, {
   bool isError = false,
+  String? actionLabel,
+  Future<void> Function()? onAction,
 }) {
-  AppToast.show(message, isError: isError);
+  AppToast.show(
+    message,
+    isError: isError,
+    actionLabel: actionLabel,
+    onAction: onAction,
+  );
+}
+
+/// Snapshots the controller's tag-operation ids before running an action so
+/// the operations it records can be offered for undo afterwards.
+Set<String> _captureTagOperationIds(TagTagController controller) =>
+    controller.tagOperations.map((operation) => operation.id).toSet();
+
+/// Shows a success toast with an undo affordance for every tag operation
+/// recorded since [before] was captured (newest first when undoing).
+void _showTagOperationUndoToast(
+  TagTagController controller,
+  Set<String> before,
+  String message,
+) {
+  final newOperationIds = controller.tagOperations
+      .where(
+        (operation) =>
+            !before.contains(operation.id) && operation.undoneAt == null,
+      )
+      .map((operation) => operation.id)
+      .toList();
+  AppToast.show(
+    message,
+    actionLabel: newOperationIds.isEmpty ? null : '撤销',
+    onAction: newOperationIds.isEmpty
+        ? null
+        : () async {
+            try {
+              for (final id in newOperationIds.reversed) {
+                await controller.undoTagOperation(id);
+              }
+            } catch (error) {
+              AppToast.show('撤销失败：$error', isError: true);
+            }
+          },
+  );
 }
 
 class PrototypeWorkspace extends StatefulWidget {
@@ -2488,6 +2531,7 @@ class _TagTreePanelState extends State<_TagTreePanel> {
 
   void _dropOn(TagPlacement dragged, String? newParentId) {
     if (dragged.parentId == newParentId) return;
+    final before = _captureTagOperationIds(widget.controller);
     // reparentPlacement validates and updates state synchronously, then
     // persists asynchronously; surface persistence/validation errors late.
     unawaited(
@@ -2503,7 +2547,16 @@ class _TagTreePanelState extends State<_TagTreePanel> {
       if (newParentId != null) _expandedIds.add(newParentId);
     });
     widget.controller.selectPlacement(dragged.id);
-    showPrototypeToast(context, '已更新：${widget.controller.pathOf(dragged.id)}');
+    // Show the toast synchronously only when the reparent actually applied;
+    // validation failures surface through the catchError above instead.
+    if (widget.controller.state.placementById(dragged.id).parentId ==
+        newParentId) {
+      _showTagOperationUndoToast(
+        widget.controller,
+        before,
+        '已更新：${widget.controller.pathOf(dragged.id)}',
+      );
+    }
   }
 
   void _expandToLevels(int levels) {
@@ -2986,14 +3039,16 @@ class _TagTreeNode extends StatelessWidget {
   }
 
   Future<void> _reparentTag(BuildContext context) async {
+    final before = _captureTagOperationIds(controller);
     final updated = await showReparentTagDialog(
       context,
       controller: controller,
       placement: placement,
     );
     if (updated == true && context.mounted) {
-      showPrototypeToast(
-        context,
+      _showTagOperationUndoToast(
+        controller,
+        before,
         '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
       );
     }
@@ -3310,10 +3365,12 @@ class _TagResultPanel extends StatelessWidget {
 
   Future<void> _togglePin(BuildContext context, TagPlacement placement) async {
     final pinned = controller.isPlacementPinned(placement.id);
+    final before = _captureTagOperationIds(controller);
     await controller.togglePlacementPinned(placement.id);
     if (context.mounted) {
-      showPrototypeToast(
-        context,
+      _showTagOperationUndoToast(
+        controller,
+        before,
         pinned
             ? '已取消固定“${controller.tagForPlacement(placement).name}”'
             : '已把“${controller.tagForPlacement(placement).name}”固定到常用标签',
@@ -3323,10 +3380,12 @@ class _TagResultPanel extends StatelessWidget {
 
   Future<void> _toggleHide(BuildContext context, TagPlacement placement) async {
     final hidden = controller.isPlacementHidden(placement.id);
+    final before = _captureTagOperationIds(controller);
     await controller.togglePlacementHidden(placement.id);
     if (context.mounted) {
-      showPrototypeToast(
-        context,
+      _showTagOperationUndoToast(
+        controller,
+        before,
         hidden
             ? '已取消隐藏“${controller.tagForPlacement(placement).name}”'
             : '已从常用标签隐藏“${controller.tagForPlacement(placement).name}”',
@@ -3340,9 +3399,10 @@ class _TagResultPanel extends StatelessWidget {
     TagNamePolicy policy,
   ) async {
     try {
+      final before = _captureTagOperationIds(controller);
       await controller.setTagNamePolicy(tag.id, policy);
       if (context.mounted) {
-        showPrototypeToast(context, '已更新“${tag.name}”的同名策略');
+        _showTagOperationUndoToast(controller, before, '已更新“${tag.name}”的同名策略');
       }
     } catch (error) {
       if (context.mounted) {
@@ -3352,14 +3412,16 @@ class _TagResultPanel extends StatelessWidget {
   }
 
   Future<void> _reparent(BuildContext context, TagPlacement placement) async {
+    final before = _captureTagOperationIds(controller);
     final updated = await showReparentTagDialog(
       context,
       controller: controller,
       placement: placement,
     );
     if (updated == true && context.mounted) {
-      showPrototypeToast(
-        context,
+      _showTagOperationUndoToast(
+        controller,
+        before,
         '“${controller.tagForPlacement(placement).name}”的上级标签已更新',
       );
     }

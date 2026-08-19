@@ -9,6 +9,7 @@ import 'package:path/path.dart' as path;
 import '../models/tag_models.dart';
 import '../state/tagtag_controller.dart';
 import '../storage/managed_library.dart';
+import 'app_toast.dart';
 import 'glass.dart';
 import 'tagtag_theme.dart';
 
@@ -215,9 +216,7 @@ class _PrototypeQuickTagDialogState extends State<PrototypeQuickTagDialog> {
               child: InkWell(
                 onTap: canInherit
                     ? () => setState(() => _inheritChildren = !_inheritChildren)
-                    : () => ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('选择一个文件夹后可启用子项继承')),
-                      ),
+                    : () => AppToast.show('选择一个文件夹后可启用子项继承'),
                 child: Row(
                   children: [
                     Icon(
@@ -1723,18 +1722,7 @@ class _PrototypeSettingsDialogState extends State<PrototypeSettingsDialog> {
 /// Toast used from inside modal dialogs (same styling as the workspace
 /// toast; the snack bar renders beneath the dialog barrier).
 void _showDialogToast(BuildContext context, String message) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Row(
-        children: [
-          const Icon(Icons.check_circle, size: 17, color: Color(0xff80d2a5)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(message)),
-        ],
-      ),
-      duration: const Duration(milliseconds: 2600),
-    ),
-  );
+  AppToast.show(message);
 }
 
 class _SettingsNavigation extends StatelessWidget {

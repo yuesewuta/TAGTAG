@@ -828,6 +828,7 @@ class TagTagController extends ChangeNotifier {
         _state.copyWith(pinnedPlacementIds: pinned),
         TagDomainOperationType.pin,
         nowPinned ? '固定常用标签“$name”' : '取消固定常用标签“$name”',
+        context: {'placementId': placementId, 'previous': !nowPinned},
       ),
     );
   }
@@ -845,6 +846,7 @@ class TagTagController extends ChangeNotifier {
         _state.copyWith(hiddenPlacementIds: hidden),
         TagDomainOperationType.hide,
         nowHidden ? '隐藏常用标签“$name”' : '取消隐藏常用标签“$name”',
+        context: {'placementId': placementId, 'previous': !nowHidden},
       ),
     );
   }
@@ -880,8 +882,9 @@ class TagTagController extends ChangeNotifier {
               )
               .toList(),
         ),
-        TagDomainOperationType.edit,
+        TagDomainOperationType.policy,
         summary,
+        context: {'tagId': tagId, 'previousPolicy': tag.namePolicy.name},
       ),
     );
   }
@@ -1030,6 +1033,11 @@ class TagTagController extends ChangeNotifier {
         ),
         TagDomainOperationType.create,
         reuseTagId == null ? '新建标签“$cleanName”' : '复用标签实体创建位置“${tag.name}”',
+        context: {
+          'placementId': placement.id,
+          'tagId': tag.id,
+          'createdNewTag': reuseTagId == null,
+        },
       ),
     );
     activePlacementId = placement.id;
@@ -1062,6 +1070,11 @@ class TagTagController extends ChangeNotifier {
         previous.name == cleanName
             ? '更新标签“$cleanName”的颜色'
             : '重命名标签“${previous.name}”为“$cleanName”',
+        context: {
+          'tagId': tagId,
+          'previousName': previous.name,
+          'previousColorValue': previous.colorValue,
+        },
       ),
     );
   }
@@ -1122,6 +1135,11 @@ class TagTagController extends ChangeNotifier {
         ),
         TagDomainOperationType.reparent,
         '调整标签“$movedName”的层级至“$targetPath”',
+        context: {
+          'placementId': placementId,
+          'previousParentId': placement.parentId,
+          'previousSortOrder': placement.sortOrder,
+        },
       ),
     );
     activePlacementId = placementId;
@@ -1364,6 +1382,45 @@ class TagTagController extends ChangeNotifier {
     if (active.last.id != operationId) {
       throw StateError('标签操作必须按从新到旧的顺序撤销');
     }
+    var next = switch (operation.type) {
+      TagDomainOperationType.merge ||
+      TagDomainOperationType.split => _undoMergeOrSplitState(operation),
+      TagDomainOperationType.create => _undoCreateState(operation),
+      TagDomainOperationType.edit => _undoEditState(operation),
+      TagDomainOperationType.policy => _undoPolicyState(operation),
+      TagDomainOperationType.reparent => _undoReparentState(operation),
+      TagDomainOperationType.deletePlacement => _undoDeletePlacementState(
+        operation,
+      ),
+      TagDomainOperationType.deleteEntity => _undoDeleteEntityState(operation),
+      TagDomainOperationType.pin => _undoPinHideState(operation, pinned: true),
+      TagDomainOperationType.hide => _undoPinHideState(
+        operation,
+        pinned: false,
+      ),
+    };
+    next = next.copyWith(
+      tagOperations: next.tagOperations
+          .map(
+            (item) => item.id == operationId
+                ? item.copyWith(undoneAt: DateTime.now())
+                : item,
+          )
+          .toList(),
+    );
+    // Structural undos can add or remove placements; never leave the
+    // selection pointing at a placement that no longer exists.
+    final selectedPlacementId = activePlacementId;
+    if (selectedPlacementId != null &&
+        !next.placements.any(
+          (placement) => placement.id == selectedPlacementId,
+        )) {
+      activePlacementId = null;
+    }
+    await _update(next);
+  }
+
+  AppState _undoMergeOrSplitState(TagDomainOperation operation) {
     final context = operation.context;
     final affectedTagIds = (context['affectedTagIds'] as List<dynamic>)
         .cast<String>()
@@ -1393,32 +1450,342 @@ class TagTagController extends ChangeNotifier {
     final ruleFolderIds = (context['ruleFolderIds'] as List<dynamic>)
         .cast<String>()
         .toSet();
-    await _update(
-      _state.copyWith(
-        tags: [
-          ..._state.tags.where((tag) => !affectedTagIds.contains(tag.id)),
-          ...tagsBefore,
-        ],
-        placements: _state.placements
-            .map((placement) => placementBeforeById[placement.id] ?? placement)
-            .toList(),
-        folderTagInheritances: [
-          ..._state.folderTagInheritances.where(
-            (rule) =>
-                !affectedTagIds.contains(rule.tagId) ||
-                !ruleFolderIds.contains(rule.folderResourceId),
-          ),
-          ...rulesBefore,
-        ],
-        tagOperations: _state.tagOperations
-            .map(
-              (item) => item.id == operationId
-                  ? item.copyWith(undoneAt: DateTime.now())
-                  : item,
-            )
-            .toList(),
-      ),
+    return _state.copyWith(
+      tags: [
+        ..._state.tags.where((tag) => !affectedTagIds.contains(tag.id)),
+        ...tagsBefore,
+      ],
+      placements: _state.placements
+          .map((placement) => placementBeforeById[placement.id] ?? placement)
+          .toList(),
+      folderTagInheritances: [
+        ..._state.folderTagInheritances.where(
+          (rule) =>
+              !affectedTagIds.contains(rule.tagId) ||
+              !ruleFolderIds.contains(rule.folderResourceId),
+        ),
+        ...rulesBefore,
+      ],
     );
+  }
+
+  AppState _undoCreateState(TagDomainOperation operation) {
+    final context = operation.context;
+    final placementId = context['placementId'] as String?;
+    final tagId = context['tagId'] as String?;
+    if (placementId == null || tagId == null) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    if (!_state.placements.any((item) => item.id == placementId)) {
+      throw StateError('该标签位置已被移除，无法撤销创建');
+    }
+    if (_state.placements.any((item) => item.parentId == placementId)) {
+      throw StateError('该标签位置已有子位置，无法撤销创建');
+    }
+    if (_state.assignments.any((item) => item.placementId == placementId)) {
+      throw StateError('该标签位置已有资源标注，无法撤销创建');
+    }
+    var tags = _state.tags;
+    if (context['createdNewTag'] == true) {
+      if (_state.placements.any(
+        (item) => item.tagId == tagId && item.id != placementId,
+      )) {
+        throw StateError('该标签实体已有其他位置，无法撤销创建');
+      }
+      if (_state.folderTagInheritances.any((rule) => rule.tagId == tagId)) {
+        throw StateError('该标签实体已有子项继承规则，无法撤销创建');
+      }
+      tags = tags.where((item) => item.id != tagId).toList();
+    }
+    return _state.copyWith(
+      tags: tags,
+      placements: _state.placements
+          .where((item) => item.id != placementId)
+          .toList(),
+    );
+  }
+
+  AppState _undoEditState(TagDomainOperation operation) {
+    final context = operation.context;
+    final tagId = context['tagId'] as String?;
+    final previousName = context['previousName'] as String?;
+    final previousColorValue = context['previousColorValue'] as int?;
+    if (tagId == null || previousName == null || previousColorValue == null) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    if (!_state.tags.any((item) => item.id == tagId)) {
+      throw StateError('该标签实体已被移除，无法撤销编辑');
+    }
+    return _state.copyWith(
+      tags: _state.tags
+          .map(
+            (item) => item.id == tagId
+                ? item.copyWith(
+                    name: previousName,
+                    colorValue: previousColorValue,
+                  )
+                : item,
+          )
+          .toList(),
+    );
+  }
+
+  AppState _undoPolicyState(TagDomainOperation operation) {
+    final context = operation.context;
+    final tagId = context['tagId'] as String?;
+    final previousPolicy = context['previousPolicy'] as String?;
+    if (tagId == null || previousPolicy == null) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    if (!_state.tags.any((item) => item.id == tagId)) {
+      throw StateError('该标签实体已被移除，无法撤销同名策略修改');
+    }
+    final policy =
+        TagNamePolicy.values.asNameMap()[previousPolicy] ??
+        TagNamePolicy.inherit;
+    return _state.copyWith(
+      tags: _state.tags
+          .map(
+            (item) =>
+                item.id == tagId ? item.copyWith(namePolicy: policy) : item,
+          )
+          .toList(),
+    );
+  }
+
+  AppState _undoReparentState(TagDomainOperation operation) {
+    final context = operation.context;
+    final placementId = context['placementId'] as String?;
+    if (placementId == null || !context.containsKey('previousParentId')) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    if (!_state.placements.any((item) => item.id == placementId)) {
+      throw StateError('该标签位置已被移除，无法撤销层级调整');
+    }
+    final previousParentId = context['previousParentId'] as String?;
+    if (previousParentId != null &&
+        !_state.placements.any((item) => item.id == previousParentId)) {
+      throw StateError('原上级标签位置已被移除，无法撤销层级调整');
+    }
+    final previousSortOrder = context['previousSortOrder'] as int? ?? 0;
+    return _state.copyWith(
+      placements: _state.placements
+          .map(
+            (item) => item.id == placementId
+                ? TagPlacement(
+                    id: item.id,
+                    spaceId: item.spaceId,
+                    tagId: item.tagId,
+                    parentId: previousParentId,
+                    sortOrder: previousSortOrder,
+                  )
+                : item,
+          )
+          .toList(),
+    );
+  }
+
+  AppState _undoDeletePlacementState(TagDomainOperation operation) {
+    final context = operation.context;
+    final placementId = context['placementId'] as String?;
+    final tagId = context['tagId'] as String?;
+    if (placementId == null || tagId == null) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    if (_state.placements.any((item) => item.id == placementId)) {
+      throw StateError('该标签位置已存在，无法撤销删除');
+    }
+    if (!_state.tags.any((item) => item.id == tagId)) {
+      throw StateError('该标签实体已被移除，无法撤销删除位置');
+    }
+    final parentId = context['parentId'] as String?;
+    if (parentId != null &&
+        !_state.placements.any((item) => item.id == parentId)) {
+      throw StateError('原上级标签位置已被移除，无法撤销删除');
+    }
+    final promotedChildIds =
+        (context['promotedChildIds'] as List<dynamic>? ?? const [])
+            .cast<String>()
+            .toSet();
+    for (final childId in promotedChildIds) {
+      if (!_state.placements.any((item) => item.id == childId)) {
+        throw StateError('被提升的子标签位置已被移除，无法撤销删除');
+      }
+    }
+    final reassignedAssignmentIds =
+        (context['reassignedAssignmentIds'] as List<dynamic>? ?? const [])
+            .cast<String>()
+            .toSet();
+    final replacementPlacementId = context['replacementPlacementId'] as String?;
+    final assignmentsById = {
+      for (final assignment in _state.assignments) assignment.id: assignment,
+    };
+    for (final assignmentId in reassignedAssignmentIds) {
+      final assignment = assignmentsById[assignmentId];
+      if (assignment == null) {
+        throw StateError('该位置的资源标注已被移除，无法撤销删除');
+      }
+      if (replacementPlacementId != null &&
+          assignment.placementId != replacementPlacementId) {
+        throw StateError('该位置的资源标注已被后续操作改变，无法撤销删除');
+      }
+    }
+    final restored = TagPlacement(
+      id: placementId,
+      spaceId: operation.spaceId,
+      tagId: tagId,
+      parentId: parentId,
+      sortOrder: context['sortOrder'] as int? ?? 0,
+    );
+    final placements = [
+      ..._state.placements.map(
+        (item) => promotedChildIds.contains(item.id)
+            ? TagPlacement(
+                id: item.id,
+                spaceId: item.spaceId,
+                tagId: item.tagId,
+                parentId: placementId,
+                sortOrder: item.sortOrder,
+              )
+            : item,
+      ),
+      restored,
+    ];
+    final assignments = [
+      ..._state.assignments.map(
+        (item) => reassignedAssignmentIds.contains(item.id)
+            ? TagAssignment(
+                id: item.id,
+                resourceId: item.resourceId,
+                placementId: placementId,
+                createdAt: item.createdAt,
+              )
+            : item,
+      ),
+    ];
+    final assignmentIds = assignments.map((item) => item.id).toSet();
+    for (final item
+        in (context['droppedAssignments'] as List<dynamic>? ?? const [])) {
+      final assignment = TagAssignment.fromJson(
+        Map<String, dynamic>.from(item as Map),
+      );
+      if (assignmentIds.add(assignment.id)) {
+        assignments.add(assignment);
+      }
+    }
+    activePlacementId = placementId;
+    return _state.copyWith(placements: placements, assignments: assignments);
+  }
+
+  AppState _undoDeleteEntityState(TagDomainOperation operation) {
+    final context = operation.context;
+    final tagJson = context['tag'];
+    if (tagJson is! Map) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    final tag = TagDefinition.fromJson(Map<String, dynamic>.from(tagJson));
+    if (_state.tags.any((item) => item.id == tag.id)) {
+      throw StateError('该标签实体已存在，无法撤销删除');
+    }
+    final restoredPlacements =
+        (context['placements'] as List<dynamic>? ?? const [])
+            .map(
+              (item) =>
+                  TagPlacement.fromJson(Map<String, dynamic>.from(item as Map)),
+            )
+            .toList();
+    final restoredIds = restoredPlacements.map((item) => item.id).toSet();
+    for (final placement in restoredPlacements) {
+      if (_state.placements.any((item) => item.id == placement.id)) {
+        throw StateError('该标签实体的位置已存在，无法撤销删除');
+      }
+      final parentId = placement.parentId;
+      if (parentId != null &&
+          !restoredIds.contains(parentId) &&
+          !_state.placements.any((item) => item.id == parentId)) {
+        throw StateError('原上级标签位置已被移除，无法撤销删除');
+      }
+    }
+    final previousParentByChildId = <String, String?>{};
+    for (final item
+        in (context['promotedChildren'] as List<dynamic>? ?? const [])) {
+      final entry = Map<String, dynamic>.from(item as Map);
+      previousParentByChildId[entry['placementId'] as String] =
+          entry['previousParentId'] as String?;
+    }
+    for (final childId in previousParentByChildId.keys) {
+      if (!_state.placements.any((item) => item.id == childId)) {
+        throw StateError('被提升的子标签位置已被移除，无法撤销删除');
+      }
+    }
+    final placements = [
+      ..._state.placements.map((item) {
+        final previousParentId = previousParentByChildId[item.id];
+        return previousParentByChildId.containsKey(item.id)
+            ? TagPlacement(
+                id: item.id,
+                spaceId: item.spaceId,
+                tagId: item.tagId,
+                parentId: previousParentId,
+                sortOrder: item.sortOrder,
+              )
+            : item;
+      }),
+      ...restoredPlacements,
+    ];
+    final assignments = [..._state.assignments];
+    final assignmentIds = assignments.map((item) => item.id).toSet();
+    for (final item in (context['assignments'] as List<dynamic>? ?? const [])) {
+      final assignment = TagAssignment.fromJson(
+        Map<String, dynamic>.from(item as Map),
+      );
+      if (!assignmentIds.add(assignment.id)) {
+        throw StateError('该标签实体的资源标注已存在，无法撤销删除');
+      }
+      assignments.add(assignment);
+    }
+    final rules = [..._state.folderTagInheritances];
+    final ruleIds = rules.map((item) => item.id).toSet();
+    for (final item
+        in (context['inheritanceRules'] as List<dynamic>? ?? const [])) {
+      final rule = FolderTagInheritance.fromJson(
+        Map<String, dynamic>.from(item as Map),
+      );
+      if (ruleIds.add(rule.id)) {
+        rules.add(rule);
+      }
+    }
+    activePlacementId = restoredPlacements.isEmpty
+        ? null
+        : restoredPlacements.first.id;
+    return _state.copyWith(
+      tags: [..._state.tags, tag],
+      placements: placements,
+      assignments: assignments,
+      folderTagInheritances: rules,
+    );
+  }
+
+  AppState _undoPinHideState(
+    TagDomainOperation operation, {
+    required bool pinned,
+  }) {
+    final placementId = operation.context['placementId'] as String?;
+    final previous = operation.context['previous'] as bool?;
+    if (placementId == null || previous == null) {
+      throw StateError('该标签操作记录缺少撤销所需的上下文');
+    }
+    final ids = {
+      ...(pinned ? _state.pinnedPlacementIds : _state.hiddenPlacementIds),
+    };
+    if (previous) {
+      ids.add(placementId);
+    } else {
+      ids.remove(placementId);
+    }
+    return pinned
+        ? _state.copyWith(pinnedPlacementIds: ids)
+        : _state.copyWith(hiddenPlacementIds: ids);
   }
 
   Future<void> deletePlacement(String placementId) async {
@@ -1431,6 +1798,10 @@ class TagTagController extends ChangeNotifier {
     if (alternativePlacements.isEmpty) {
       throw StateError('这是该标签实体的最后一个位置，请改用“删除标签实体”');
     }
+    final promotedChildIds = _state.placements
+        .where((item) => item.parentId == placementId)
+        .map((item) => item.id)
+        .toList();
     final remainingPlacements = _state.placements
         .where((item) => item.id != placementId)
         .map(
@@ -1449,8 +1820,11 @@ class TagTagController extends ChangeNotifier {
     final replacementPlacementId = alternativePlacements.first.id;
     final assignmentKeys = <String>{};
     final remainingAssignments = <TagAssignment>[];
+    final reassignedAssignmentIds = <String>[];
+    final droppedAssignments = <TagAssignment>[];
     for (final assignment in _state.assignments) {
-      final next = assignment.placementId == placementId
+      final onRemovedPlacement = assignment.placementId == placementId;
+      final next = onRemovedPlacement
           ? TagAssignment(
               id: assignment.id,
               resourceId: assignment.resourceId,
@@ -1460,6 +1834,13 @@ class TagTagController extends ChangeNotifier {
           : assignment;
       if (assignmentKeys.add('${next.resourceId}|${next.placementId}')) {
         remainingAssignments.add(next);
+        if (onRemovedPlacement) {
+          reassignedAssignmentIds.add(assignment.id);
+        }
+      } else {
+        // Snapshot every dropped assignment in its original form so undo can
+        // restore the exact pre-delete assignment set.
+        droppedAssignments.add(assignment);
       }
     }
     activePlacementId = null;
@@ -1471,6 +1852,18 @@ class TagTagController extends ChangeNotifier {
         ),
         TagDomainOperationType.deletePlacement,
         '删除标签位置“$removedPath”',
+        context: {
+          'placementId': placement.id,
+          'tagId': placement.tagId,
+          'parentId': placement.parentId,
+          'sortOrder': placement.sortOrder,
+          'promotedChildIds': promotedChildIds,
+          'reassignedAssignmentIds': reassignedAssignmentIds,
+          'replacementPlacementId': replacementPlacementId,
+          'droppedAssignments': droppedAssignments
+              .map((assignment) => assignment.toJson())
+              .toList(),
+        },
       ),
     );
   }
@@ -1509,6 +1902,20 @@ class TagTagController extends ChangeNotifier {
     }
 
     final removedPlacementIds = parentByRemovedId.keys.toSet();
+    final promotedChildren = <Map<String, dynamic>>[
+      for (final placement in _state.placements)
+        if (!removedPlacementIds.contains(placement.id) &&
+            removedPlacementIds.contains(placement.parentId))
+          {'placementId': placement.id, 'previousParentId': placement.parentId},
+    ];
+    final removedAssignments = _state.assignments
+        .where(
+          (assignment) => removedPlacementIds.contains(assignment.placementId),
+        )
+        .toList();
+    final removedRules = _state.folderTagInheritances
+        .where((rule) => rule.tagId == tagId)
+        .toList();
     final placements = _state.placements
         .where((placement) => !removedPlacementIds.contains(placement.id))
         .map(
@@ -1541,6 +1948,19 @@ class TagTagController extends ChangeNotifier {
         ),
         TagDomainOperationType.deleteEntity,
         '删除标签实体“${tag.name}”',
+        context: {
+          'tag': tag.toJson(),
+          'placements': removedPlacements
+              .map((placement) => placement.toJson())
+              .toList(),
+          'assignments': removedAssignments
+              .map((assignment) => assignment.toJson())
+              .toList(),
+          'inheritanceRules': removedRules
+              .map((rule) => rule.toJson())
+              .toList(),
+          'promotedChildren': promotedChildren,
+        },
       ),
     );
   }
@@ -2071,8 +2491,9 @@ class TagTagController extends ChangeNotifier {
   AppState _withTagOperation(
     AppState state,
     TagDomainOperationType type,
-    String summary,
-  ) {
+    String summary, {
+    Map<String, dynamic> context = const {},
+  }) {
     final spaceId = activeSpaceId;
     if (spaceId == null) {
       return state;
@@ -2085,7 +2506,7 @@ class TagTagController extends ChangeNotifier {
           spaceId: spaceId,
           type: type,
           summary: summary,
-          context: const {},
+          context: context,
           createdAt: DateTime.now(),
           undoneAt: null,
         ),

@@ -842,6 +842,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         reuseTagId: result.reuseTagId,
       ),
       successMessage: result.reuseTagId == null ? '已创建标签' : '已复用已有标签实体。',
+      undoable: true,
     );
   }
 
@@ -872,6 +873,7 @@ class _TagTagHomeState extends State<TagTagHome> {
         colorValue: result.colorValue,
       ),
       successMessage: '已更新标签实体；所有复用位置同步显示',
+      undoable: true,
     );
   }
 
@@ -969,6 +971,7 @@ class _TagTagHomeState extends State<TagTagHome> {
       await _runAction(
         () => controller.deleteTagEntity(tag.id),
         successMessage: '已删除标签实体；失去标签的资源已进入待整理区',
+        undoable: true,
       );
       return;
     }
@@ -984,6 +987,7 @@ class _TagTagHomeState extends State<TagTagHome> {
     await _runAction(
       () => controller.deletePlacement(placementId),
       successMessage: '已删除标签位置',
+      undoable: true,
     );
   }
 
@@ -1262,9 +1266,7 @@ class _TagTagHomeState extends State<TagTagHome> {
             .where(
               (operation) =>
                   !beforeTagOperations!.contains(operation.id) &&
-                  operation.undoneAt == null &&
-                  (operation.type == TagDomainOperationType.merge ||
-                      operation.type == TagDomainOperationType.split),
+                  operation.undoneAt == null,
             )
             .map((operation) => operation.id)
             .toList();

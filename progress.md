@@ -643,3 +643,11 @@
 - 导入、重命名、整理、合并、拆分成功后的 Toast 提供「撤销」动作，基于既有领域层撤销按批逆序执行；统一日志界面保持无撤销。
 - 重命名后缀筹码改为基于原始名称生成；同名导入提示保留「重命名」入口。
 - 最终门禁：分析 0 问题，全量测试 162/162，Windows Release 构建成功；发布 v1.1.0。
+
+## 会话：2026-08-19（标签操作全量撤销）
+
+- 按 .scratch/full-undo/spec.md 实施：标签修改撤销从仅合并/拆分扩展到全部标签操作。
+- 领域层（tagtag_controller.dart）：`_withTagOperation` 新增 context 参数，createPlacement/updateTag/reparentPlacement/deletePlacement/deleteTagEntity/togglePlacementPinned/togglePlacementHidden 全部记录撤销快照（删除位置含被提升子位置、被改派与被去重丢弃的标注；删除实体含完整标签/位置/标注/继承规则/子位置原上级）。同名策略从 edit 拆出独立 `policy` 类型（TagDomainOperationType 追加枚举值，旧 JSON 记录仍可解析）。`undoTagOperation` 改为按类型分派：create 删除位置（createdNewTag 时连带删除实体；已有子位置/标注/继承规则则拒绝）、edit 还原名称与颜色、policy 还原策略、reparent 还原上级与排序、deletePlacement 重建位置并回移子位置与标注、deleteEntity 整体还原快照、pin/hide 还原集合成员；保留从新到旧顺序与重复撤销报错，结构已变化或缺上下文的旧记录（如资源标注类 edit）以明确 StateError 拒绝；撤销后校正失效的 activePlacementId。
+- UI 接线：`showPrototypeToast` 支持 actionLabel/onAction 透传；workspace 新增操作差集捕获与撤销 Toast 助手，接入拖拽改层级、结果面板与树节点更改上级、固定/隐藏/同名策略；home_screen 的 `_runAction` 撤销过滤器放开到全部类型，新建/编辑/删除标签流程开启 undoable。
+- 测试：新增 test/tag_operation_undo_test.dart 11 个（各类型撤销往返、复用实体创建、持久化重载后连续撤销、重复撤销报错、无上下文旧记录拒绝、JSON 向后兼容）。
+- 最终门禁：分析 0 问题，全量测试 173/173（基线 162 + 新增 11），Windows Release 构建成功；full-undo 两个工单与 map 均已 resolved。未做 git 提交。
